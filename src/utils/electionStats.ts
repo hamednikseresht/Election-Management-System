@@ -1,7 +1,7 @@
-import { BallotLogEntry, Candidate, SingleElection } from '../types';
+import { BallotLogEntry, Candidate, MajorityRule, SingleElection } from '../types';
 import { createId } from './ids';
 
-export type RankStatus = 'winner' | 'tie' | 'alternate' | 'out';
+export type RankStatus = 'winner' | 'tie' | 'alternate' | 'out' | 'short';
 
 export interface RankedCandidate extends Candidate {
   rank: number;
@@ -25,6 +25,9 @@ export interface CompetitiveStats {
   averageNamesPerBallot: number;
   ranked: RankedCandidate[];
   hasSeatTie: boolean;
+  majorityRule: MajorityRule;
+  requiredAbsoluteVotes: number;
+  hasUnfilledSeats: boolean;
 }
 
 export type ConfidenceOutcome = 'approved' | 'rejected' | 'counting';
@@ -54,10 +57,98 @@ export function getBallotLog(election: SingleElection): BallotLogEntry[] {
   return Array.isArray(election.ballotLog) ? election.ballotLog : [];
 }
 
+export function getMajorityRule(election: SingleElection): MajorityRule {
+  return election.majorityRule === 'absolute' ? 'absolute' : 'relative';
+}
+
+export function requiredAbsoluteVotes(ballotBase: number): number {
+  return ballotBase > 0 ? Math.floor(ballotBase / 2) + 1 : 1;
+}
+
+/** سقف مشخص روشن است (حتی اگر هنوز عدد کل صفر باشد). شمارش پویا = بدون سقف. */
+export function isBallotCeilingMode(election: SingleElection): boolean {
+  return election.isTotalBallotsKnown ?? true;
+}
+
+/** سقف عددی قابل اعمال است (حالت سقف + کل > ۰). */
+export function hasBallotCeiling(election: SingleElection): boolean {
+  return isBallotCeilingMode(election) && (election.totalVotes || 0) > 0;
+}
+
+export function capToBallotCeiling(election: SingleElection, counted: number): number {
+  const next = Math.max(0, counted);
+  if (!isBallotCeilingMode(election)) return next;
+  return Math.min(next, Math.max(0, election.totalVotes || 0));
+}
+
+export function getRegisteredBallotCount(election: SingleElection): number {
+  if (election.type === 'confidence') {
+    const yesVotes = Math.max(0, election.confidence?.yesVotes || 0);
+    const noVotes = Math.max(0, election.confidence?.noVotes || 0);
+    const invalidVotes = Math.max(0, election.invalidVotes || 0);
+    return yesVotes + noVotes + invalidVotes;
+  }
+  const invalidVotes = typeof election.invalidVotes === 'number' ? Math.max(0, election.invalidVotes) : 0;
+  const maxCandidateVotes = (Array.isArray(election.candidates) ? election.candidates : [])
+    .reduce((max, c) => Math.max(max, c.votes || 0), 0);
+  return Math.max(
+    typeof election.countedBallots === 'number' ? election.countedBallots : 0,
+    maxCandidateVotes + invalidVotes,
+  );
+}
+
+/**
+ * ثبت تعرفه جدید:
+ * - شمارش پویا: بدون محدودیت
+ * - سقف مشخص: فقط وقتی تعداد ثبت‌شده هنوز از کل کمتر است (نتیجهٔ نهایی ≤ کل)
+ */
+export function canRegisterBallot(election: SingleElection): boolean {
+  if (isElectionLocked(election)) return false;
+  if (!isBallotCeilingMode(election)) return true;
+  const total = Math.max(0, election.totalVotes || 0);
+  return getRegisteredBallotCount(election) < total;
+}
+
+/** حداکثر نام مجاز روی یک تعرفه = تعداد نفرات منتخب */
+export function getMaxMarksPerBallot(election: SingleElection): number {
+  return Math.max(1, election.winnersCount || 1);
+}
+
+export function isBallotSelectionWithinLimit(
+  election: SingleElection,
+  candidateIds: string[],
+): boolean {
+  const unique = new Set(candidateIds.filter(Boolean));
+  return unique.size > 0 && unique.size <= getMaxMarksPerBallot(election);
+}
+
+/**
+ * پایان رأی‌گیری فقط وقتی همهٔ تعرفه‌های سقف ثبت شده باشند.
+ * در شمارش پویا سقف نیست و پایان آزاد است.
+ */
+export function getConcludeBlockReason(election: SingleElection): string | null {
+  if (isElectionLocked(election)) return null;
+  if (!isBallotCeilingMode(election)) return null;
+  const total = Math.max(0, election.totalVotes || 0);
+  if (total <= 0) {
+    return 'برای پایان رأی‌گیری ابتدا سقف کل تعرفه‌ها را وارد کنید.';
+  }
+  const counted = getRegisteredBallotCount(election);
+  if (counted < total) {
+    return `پایان رأی‌گیری فقط پس از ثبت همهٔ تعرفه‌ها ممکن است (${counted.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} برگه).`;
+  }
+  return null;
+}
+
+export function canConcludeElection(election: SingleElection): boolean {
+  return getConcludeBlockReason(election) === null;
+}
+
 export function rankCandidates(
   candidates: Candidate[],
   winnersCount: number,
   ballotBase: number,
+  majorityRule: MajorityRule = 'relative',
 ): RankedCandidate[] {
   const sorted = [...candidates].sort((a, b) => {
     if ((b.votes || 0) !== (a.votes || 0)) return (b.votes || 0) - (a.votes || 0);
@@ -74,6 +165,7 @@ export function rankCandidates(
     firstTiedIndex < seats &&
     firstTiedIndex + tiedCount > seats;
   const maxVotes = sorted[0]?.votes || 0;
+  const absoluteNeeded = requiredAbsoluteVotes(ballotBase);
 
   return sorted.map((c, i) => {
     let status: RankStatus;
@@ -87,6 +179,14 @@ export function rankCandidates(
       status = 'alternate';
     } else {
       status = 'out';
+    }
+
+    if (
+      majorityRule === 'absolute' &&
+      (status === 'winner' || status === 'tie') &&
+      c.votes < absoluteNeeded
+    ) {
+      status = 'short';
     }
 
     return {
@@ -119,7 +219,9 @@ export function getCompetitiveStats(election: SingleElection): CompetitiveStats 
     ? Math.min(100, Math.round((countedBallots / totalVotes) * 100))
     : 0;
   const validBallots = Math.max(1, countedBallots - invalidVotes);
-  const ranked = rankCandidates(candidates, election.winnersCount || 1, countedBallots);
+  const majorityRule = getMajorityRule(election);
+  const ranked = rankCandidates(candidates, election.winnersCount || 1, countedBallots, majorityRule);
+  const seats = Math.max(1, election.winnersCount || 1);
 
   return {
     invalidVotes,
@@ -136,6 +238,9 @@ export function getCompetitiveStats(election: SingleElection): CompetitiveStats 
     averageNamesPerBallot: countedBallots > 0 ? totalCandidateMarks / validBallots : 0,
     ranked,
     hasSeatTie: ranked.some((c) => c.status === 'tie'),
+    majorityRule,
+    requiredAbsoluteVotes: requiredAbsoluteVotes(countedBallots),
+    hasUnfilledSeats: majorityRule === 'absolute' && ranked.filter((c) => c.status === 'winner').length < seats,
   };
 }
 
@@ -190,8 +295,15 @@ function pushLog(election: SingleElection, kind: BallotLogEntry['kind'], candida
 }
 
 export function submitValidBallot(election: SingleElection, candidateIds: string[]): SingleElection {
-  if (candidateIds.length === 0) return election;
-  const selected = new Set(candidateIds);
+  const uniqueIds = [...new Set(candidateIds.filter(Boolean))];
+  if (
+    uniqueIds.length === 0 ||
+    !canRegisterBallot(election) ||
+    !isBallotSelectionWithinLimit(election, uniqueIds)
+  ) {
+    return election;
+  }
+  const selected = new Set(uniqueIds);
   const newCandidates = election.candidates.map((c) =>
     selected.has(c.id) ? { ...c, votes: c.votes + 1 } : c,
   );
@@ -201,17 +313,18 @@ export function submitValidBallot(election: SingleElection, candidateIds: string
   return {
     ...election,
     candidates: newCandidates,
-    countedBallots: Math.max(currentBallots + 1, newMax + election.invalidVotes),
-    ballotLog: pushLog(election, 'valid', candidateIds),
+    countedBallots: capToBallotCeiling(election, Math.max(currentBallots + 1, newMax + election.invalidVotes)),
+    ballotLog: pushLog(election, 'valid', uniqueIds),
   };
 }
 
 export function submitInvalidBallot(election: SingleElection): SingleElection {
+  if (!canRegisterBallot(election)) return election;
   const currentBallots = typeof election.countedBallots === 'number' ? election.countedBallots : 0;
   return {
     ...election,
     invalidVotes: election.invalidVotes + 1,
-    countedBallots: currentBallots + 1,
+    countedBallots: capToBallotCeiling(election, currentBallots + 1),
     ballotLog: pushLog(election, 'invalid', []),
   };
 }
@@ -243,6 +356,7 @@ export function undoLastBallot(election: SingleElection): SingleElection {
 }
 
 export function concludeElection(election: SingleElection): SingleElection {
+  if (getConcludeBlockReason(election)) return election;
   return {
     ...election,
     concludedAt: election.concludedAt || new Date().toISOString(),

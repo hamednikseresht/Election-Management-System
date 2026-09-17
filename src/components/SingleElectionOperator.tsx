@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ChangeEvent } from 'react';
+﻿import { useState, type FormEvent, type ChangeEvent } from 'react';
 import { SingleElection, Candidate, ElectionType } from '../types';
 import { DisplayThemeConfig } from './SingleElectionDisplay';
 import { fileToBase64Optimized } from '../utils/imageHelper';
@@ -11,6 +11,10 @@ import {
   getConfidenceStats,
   isElectionLocked,
   reopenElection,
+  canRegisterBallot,
+  capToBallotCeiling,
+  getConcludeBlockReason,
+  getMajorityRule,
 } from '../utils/electionStats';
 import { 
   Plus, Trash2, Users, XCircle, 
@@ -45,6 +49,7 @@ export function SingleElectionOperator({
   const [editingCandidateVotes, setEditingCandidateVotes] = useState<string>('');
   const [editingCandidateNameId, setEditingCandidateNameId] = useState<string | null>(null);
   const [editingCandidateNameValue, setEditingCandidateNameValue] = useState<string>('');
+  const [pendingDeleteCandidateId, setPendingDeleteCandidateId] = useState<string | null>(null);
 
   const isConfidence = election.type === 'confidence';
   const locked = isElectionLocked(election);
@@ -64,6 +69,9 @@ export function SingleElectionOperator({
       ? Math.max(0, election.totalVotes - confidenceStats.countedBallots)
       : 0)
     : competitive.remainingBallots;
+  const canRegister = canRegisterBallot(election);
+  const concludeBlockReason = locked ? null : getConcludeBlockReason(election);
+  const majorityRule = getMajorityRule(election);
 
   const applyChange = (updater: (prev: SingleElection) => SingleElection) => {
     onUpdate((prev) => (isElectionLocked(prev) ? prev : updater(prev)));
@@ -103,6 +111,11 @@ export function SingleElectionOperator({
   };
 
   const handleEndVoting = () => {
+    if (locked) {
+      setShowReportModal(true);
+      return;
+    }
+    if (getConcludeBlockReason(election)) return;
     onUpdate((prev) => concludeElection(prev));
     setShowReportModal(true);
   };
@@ -175,19 +188,20 @@ export function SingleElectionOperator({
   const removeCandidate = (id: string) => {
     applyChange(prev => ({ ...prev, candidates: prev.candidates.filter(c => c.id !== id) }));
     setBallotSelectedIds(prev => prev.filter(cId => cId !== id));
+    setPendingDeleteCandidateId(null);
   };
 
   // Direct increment / decrement candidate
   const incrementCandidateVote = (id: string) => {
     applyChange(prev => {
+      if (!canRegisterBallot(prev)) return prev;
       const newCandidates = prev.candidates.map(c => c.id === id ? { ...c, votes: c.votes + 1 } : c);
       const newMax = newCandidates.reduce((max, c) => Math.max(max, c.votes), 0);
       const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : 0;
       return {
         ...prev,
         candidates: newCandidates,
-        // Ensure countedBallots is at least the highest individual vote + invalidVotes
-        countedBallots: Math.max(currentBallots, newMax + prev.invalidVotes)
+        countedBallots: capToBallotCeiling(prev, Math.max(currentBallots, newMax + prev.invalidVotes))
       };
     });
   };
@@ -214,7 +228,7 @@ export function SingleElectionOperator({
       return {
         ...prev,
         candidates: newCandidates,
-        countedBallots: Math.max(currentBallots, newMax + prev.invalidVotes)
+        countedBallots: capToBallotCeiling(prev, Math.max(currentBallots, newMax + prev.invalidVotes))
       };
     });
     setEditingCandidateId(null);
@@ -223,18 +237,19 @@ export function SingleElectionOperator({
   const syncBallotsToVotes = () => {
     applyChange(prev => ({
       ...prev,
-      countedBallots: competitive.maxCandidateVotes + prev.invalidVotes
+      countedBallots: capToBallotCeiling(prev, competitive.maxCandidateVotes + prev.invalidVotes)
     }));
   };
 
   // Ballots & Invalid votes
   const incrementInvalidVote = () => {
     applyChange(prev => {
+      if (!canRegisterBallot(prev)) return prev;
       const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : 0;
       return { 
         ...prev, 
         invalidVotes: prev.invalidVotes + 1,
-        countedBallots: Math.max(currentBallots, competitive.maxCandidateVotes + prev.invalidVotes + 1)
+        countedBallots: capToBallotCeiling(prev, Math.max(currentBallots, competitive.maxCandidateVotes + prev.invalidVotes + 1))
       };
     });
   };
@@ -248,10 +263,13 @@ export function SingleElectionOperator({
 
   // Confidence votes
   const incrementConfidenceYes = () => {
-    applyChange(prev => ({
-      ...prev,
-      confidence: { ...prev.confidence, yesVotes: prev.confidence.yesVotes + 1 }
-    }));
+    applyChange(prev => {
+      if (!canRegisterBallot(prev)) return prev;
+      return {
+        ...prev,
+        confidence: { ...prev.confidence, yesVotes: prev.confidence.yesVotes + 1 }
+      };
+    });
   };
 
   const decrementConfidenceYes = () => {
@@ -262,10 +280,13 @@ export function SingleElectionOperator({
   };
 
   const incrementConfidenceNo = () => {
-    applyChange(prev => ({
-      ...prev,
-      confidence: { ...prev.confidence, noVotes: prev.confidence.noVotes + 1 }
-    }));
+    applyChange(prev => {
+      if (!canRegisterBallot(prev)) return prev;
+      return {
+        ...prev,
+        confidence: { ...prev.confidence, noVotes: prev.confidence.noVotes + 1 }
+      };
+    });
   };
 
   const decrementConfidenceNo = () => {
@@ -355,7 +376,7 @@ export function SingleElectionOperator({
               onClick={handleToggleActive}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
                 election.active 
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white' 
+                  ? 'bg-slate-700 hover:bg-slate-600 text-white' 
                   : 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300'
               }`}
             >
@@ -369,10 +390,13 @@ export function SingleElectionOperator({
             type="button"
             id={`end-voting-btn-${election.id}`}
             onClick={handleEndVoting}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-all shadow-xs cursor-pointer"
-            title="پایان فرآیند رأی‌گیری و صدور صورتجلسه رسمی و گزارش کامل"
+            disabled={!locked && Boolean(concludeBlockReason)}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black border border-sky-300 bg-sky-50 text-sky-700 transition-all shadow-xs ${
+              !locked && concludeBlockReason ? 'opacity-50 cursor-not-allowed' : 'hover:bg-sky-100 cursor-pointer'
+            }`}
+            title={concludeBlockReason || (locked ? 'مشاهده صورتجلسه' : 'پایان فرآیند رأی‌گیری و صدور صورتجلسه رسمی')}
           >
-            <FileText size={13} className="text-indigo-600" />
+            <FileText size={13} className="text-sky-700" />
             <span>{locked ? 'مشاهده صورتجلسه' : 'پایان رأی‌گیری و صورتجلسه'}</span>
           </button>
 
@@ -380,7 +404,7 @@ export function SingleElectionOperator({
             <button
               type="button"
               onClick={handleReopenVoting}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 cursor-pointer"
             >
               <Unlock size={13} />
               <span>بازگشایی شمارش</span>
@@ -426,7 +450,7 @@ export function SingleElectionOperator({
             onClick={() => handleTypeChange('candidates')}
             className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               election.type === 'candidates'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-sky-700 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -437,7 +461,7 @@ export function SingleElectionOperator({
             onClick={() => handleTypeChange('confidence')}
             className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               election.type === 'confidence'
-                ? 'bg-emerald-600 text-white shadow-xs'
+                ? 'bg-slate-700 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
@@ -446,13 +470,19 @@ export function SingleElectionOperator({
         </div>
       </div>
 
+      {concludeBlockReason && (
+        <div className="p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs text-slate-800 font-medium">
+          {concludeBlockReason}
+        </div>
+      )}
+
       {locked && (
-        <div className="p-3 bg-indigo-50 border border-indigo-300 rounded-2xl flex items-center justify-between text-xs text-indigo-950 font-medium">
+        <div className="p-3 bg-sky-50 border border-sky-200 rounded-xl flex items-center justify-between text-xs text-slate-900 font-medium">
           <span>شمارش این انتخابات قفل شده است. برای تغییر آرا ابتدا «بازگشایی شمارش» را بزنید.</span>
           <button
             type="button"
             onClick={() => setShowReportModal(true)}
-            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1 rounded-lg cursor-pointer"
+            className="ems-btn ems-btn-primary !min-h-8"
           >
             صورتجلسه
           </button>
@@ -461,15 +491,15 @@ export function SingleElectionOperator({
 
       {/* Inactive Warning Alert */}
       {!election.active && (
-        <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between text-xs text-amber-900 font-medium">
+        <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between text-xs text-slate-800 font-medium">
           <div className="flex items-center gap-2">
-            <AlertCircle size={16} className="text-amber-600 shrink-0" />
+            <AlertCircle size={16} className="text-slate-600 shrink-0" />
             <span>این انتخابات در وضعیت <strong>غیرفعال</strong> است و در صفحه نمایشگر نتایج مخفی می‌باشد.</span>
           </div>
           <button
             type="button"
             onClick={handleToggleActive}
-            className="text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-1 rounded-lg transition-colors cursor-pointer"
+            className="text-xs bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-1 rounded-lg transition-colors cursor-pointer"
           >
             فعال‌سازی
           </button>
@@ -487,7 +517,7 @@ export function SingleElectionOperator({
             value={election.title}
             onChange={(e) => applyChange(prev => ({ ...prev, title: e.target.value }))}
             placeholder="عنوان انتخابات را بنویسید (مثلاً: انتخابات مجمع عمومی)"
-            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium"
+            className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:border-sky-600 focus:ring-1 focus:ring-sky-600 font-medium"
           />
         </div>
 
@@ -522,7 +552,7 @@ export function SingleElectionOperator({
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
               <Users size={18} />
             </div>
             <div>
@@ -549,12 +579,12 @@ export function SingleElectionOperator({
                     const val = rawVal === '' ? 0 : parseInt(rawVal, 10);
                     applyChange(prev => ({ ...prev, totalVotes: isNaN(val) ? 0 : Math.max(0, val) }));
                   }}
-                  className="w-24 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-indigo-500"
+                  className="w-24 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-sky-600"
                 />
                 <span className="text-xs text-slate-500">برگه</span>
               </div>
             ) : (
-              <span className="text-xs font-medium text-amber-700 bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200">
+              <span className="text-xs font-medium text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-amber-200">
                 تعداد کل برگه‌ها نامشخص (محاسبه درصد بر اساس برگه‌های خوانده‌شده)
               </span>
             )}
@@ -575,14 +605,14 @@ export function SingleElectionOperator({
                 const val = rawVal === '' ? 0 : parseInt(rawVal, 10);
                 applyChange(prev => ({ ...prev, countedBallots: isNaN(val) ? 0 : Math.max(0, val) }));
               }}
-              className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-indigo-500"
+              className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-sky-600"
             />
             <span className="text-xs text-slate-500">برگه</span>
             {effectiveCounted < minRequiredBallots && (
               <button
                 type="button"
                 onClick={syncBallotsToVotes}
-                className="text-[11px] text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2 py-0.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer"
+                className="text-[11px] text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-2 py-0.5 rounded-lg font-bold flex items-center gap-1 cursor-pointer"
                 title="تراز کردن خودکار تعداد برگه‌ها با بیشترین رأی کاندیدا"
               >
                 <RefreshCw size={11} />
@@ -608,10 +638,14 @@ export function SingleElectionOperator({
                 type="button"
                 onClick={() => applyChange(prev => ({ 
                   ...prev, 
-                  countedBallots: (typeof prev.countedBallots === 'number' ? prev.countedBallots : effectiveCounted) + 1 
+                  countedBallots: capToBallotCeiling(
+                    prev,
+                    (typeof prev.countedBallots === 'number' ? prev.countedBallots : effectiveCounted) + 1,
+                  ),
                 }))}
-                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-bold text-xs border border-slate-300 cursor-pointer"
-                title="افزایش یک برگه قرائت‌شده"
+                disabled={!canRegister}
+                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-800 rounded-lg font-bold text-xs border border-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                title={canRegister ? 'افزایش یک برگه قرائت‌شده' : 'سقف کل تعرفه‌ها پر شده است'}
               >
                 +۱ برگه
               </button>
@@ -621,10 +655,12 @@ export function SingleElectionOperator({
               {isTotalBallotsKnown && election.totalVotes > 0 ? (
                 <>
                   <span className="text-slate-500 font-medium">باقی‌مانده: {remainingBallots} برگه</span>
-                  <span className="font-black text-indigo-700">{countedPercentage}٪</span>
+                  <span className="font-black text-sky-700">{countedPercentage}٪</span>
                 </>
+              ) : isTotalBallotsKnown ? (
+                <span className="text-slate-600 text-[11px] font-medium">ابتدا سقف کل تعرفه‌ها را وارد کنید</span>
               ) : (
-                <span className="text-amber-700 text-[11px] font-medium">شمارش آزاد (بدون سقف اولیه)</span>
+                <span className="text-slate-600 text-[11px] font-medium">شمارش آزاد (بدون سقف)</span>
               )}
             </div>
           </div>
@@ -632,7 +668,7 @@ export function SingleElectionOperator({
           {isTotalBallotsKnown && election.totalVotes > 0 && (
             <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mt-1">
               <div 
-                className="h-full bg-indigo-600 transition-all duration-300"
+                className="h-full bg-sky-700 transition-all duration-300"
                 style={{ width: `${countedPercentage}%` }}
               />
             </div>
@@ -641,79 +677,80 @@ export function SingleElectionOperator({
 
         {/* Hint banner explaining multiple candidates per ballot */}
         <div className="text-[11px] text-slate-600 bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2 shadow-xs">
-          <HelpCircle size={15} className="text-indigo-600 shrink-0 mt-0.5" />
+          <HelpCircle size={15} className="text-sky-700 shrink-0 mt-0.5" />
           <div className="leading-relaxed">
-            <strong>نکته انتخابات هیئت مدیره:</strong> رأی‌دهندگان روی یک تعرفه ممکن است نام ۱ یا چند کاندیدا را بنویسند.
+            <strong>نکته انتخابات چند منتخب:</strong> روی هر تعرفه حداکثر به تعداد نفرات منتخب می‌توان نام نوشت (کمتر یا مساوی).
             مجموع آرای داده‌شده به کاندیداها ({totalCandidateVotes} رأی) از تعداد برگه‌های تعرفه ({effectiveCounted} برگه) تفکیک شده و درصد هر کاندیدا بر مبنای تعرفه‌ها محاسبه می‌گردد.
           </div>
         </div>
 
       </div>
 
-      {/* Invalid Votes Counter */}
-      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
-            <XCircle size={18} />
-          </div>
-          <div>
-            <div className="text-xs font-bold text-rose-950">برگه‌های رأی باطله یا سفید</div>
-            <div className="text-[10px] text-rose-700">تعرفه‌های مخدوش یا بدون نام</div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={decrementInvalidVote}
-            disabled={election.invalidVotes <= 0}
-            className="w-8 h-8 bg-white border border-rose-300 hover:bg-rose-100 disabled:opacity-30 rounded-lg flex items-center justify-center text-rose-800 font-bold text-sm cursor-pointer"
-          >
-            <Minus size={14} />
-          </button>
-          <span className="text-xl font-black text-rose-900 w-10 text-center tabular-nums">
-            {election.invalidVotes}
-          </span>
-          <button
-            type="button"
-            onClick={incrementInvalidVote}
-            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-          >
-            +۱ باطله
-          </button>
-        </div>
-      </div>
-
       {/* -------------------- OPERATOR: CANDIDATES MODE -------------------- */}
       {election.type === 'candidates' && (
         <div className="flex flex-col gap-5">
           
-          {/* Top Row: Winners Count & Add Candidate */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-slate-700 font-bold">تعداد نفرات منتخب:</label>
-              <input
-                type="number"
-                min={1}
-                value={election.winnersCount === 0 ? '' : election.winnersCount}
-                placeholder="1"
-                onChange={(e) => {
-                  const rawVal = e.target.value.trim();
-                  const val = rawVal === '' ? 1 : parseInt(rawVal, 10);
-                  applyChange(prev => ({ ...prev, winnersCount: isNaN(val) ? 1 : Math.max(1, val) }));
-                }}
-                className="w-16 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-xs font-black text-slate-900"
-              />
-              <span className="text-[11px] text-slate-500">نفر منتخب نهایی</span>
-            </div>
+          {/* Winners count + majority rule */}
+          <div className="flex flex-col gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-700 font-bold">تعداد نفرات منتخب:</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={election.winnersCount === 0 ? '' : election.winnersCount}
+                  placeholder="1"
+                  onChange={(e) => {
+                    const rawVal = e.target.value.trim();
+                    const val = rawVal === '' ? 1 : parseInt(rawVal, 10);
+                    applyChange(prev => ({ ...prev, winnersCount: isNaN(val) ? 1 : Math.max(1, val) }));
+                  }}
+                  className="w-16 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-xs font-black text-slate-900"
+                />
+                <span className="text-[11px] text-slate-500">نفر منتخب نهایی</span>
+              </div>
 
-            {/* Quick Candidate Add Form with Photo Upload and Duplicate Prevention */}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs text-slate-700 font-bold">حد نصاب منتخبین:</label>
+                <div className="flex p-0.5 rounded-lg border border-slate-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => applyChange(prev => ({ ...prev, majorityRule: 'relative' }))}
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-md cursor-pointer ${
+                      majorityRule === 'relative' ? 'bg-sky-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="بیشترین رأی کافی است (اکثریت نسبی)"
+                  >
+                    اکثریت نسبی
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyChange(prev => ({ ...prev, majorityRule: 'absolute' }))}
+                    className={`px-3 py-1.5 text-[11px] font-bold rounded-md cursor-pointer ${
+                      majorityRule === 'absolute' ? 'bg-sky-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="منتخب باید بیش از ۵۰٪ تعرفه‌های قرائت‌شده را داشته باشد"
+                  >
+                    اکثریت مطلق
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="text-[10px] text-slate-500 leading-relaxed">
+              {majorityRule === 'absolute'
+                ? 'اکثریت مطلق: هر منتخب باید بیش از نیمی از تعرفه‌های قرائت‌شده را بیاورد؛ در غیر این صورت کرسی خالی می‌ماند.'
+                : 'اکثریت نسبی: نفرات با بیشترین رأی منتخب می‌شوند؛ نیازی به بیش از ۵۰٪ نیست.'}
+            </div>
+          </div>
+
+          {/* Quick Candidate Add Form with Photo Upload and Duplicate Prevention */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
             <form onSubmit={addCandidate} className="flex flex-col gap-1.5 flex-1 max-w-md">
               <div className="flex items-center gap-1.5">
                 {/* Photo Picker */}
                 <label 
                   className={`relative w-8 h-8 rounded-lg border flex items-center justify-center cursor-pointer shrink-0 transition-colors ${
-                    newCandidatePhoto ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200' : 'border-slate-300 bg-white hover:bg-slate-100 text-slate-500'
+                    newCandidatePhoto ? 'border-sky-400 bg-sky-50 ring-2 ring-sky-200' : 'border-slate-300 bg-white hover:bg-slate-100 text-slate-500'
                   }`}
                   title="افزودن عکس پروفایل برای کاندیدا"
                 >
@@ -753,12 +790,12 @@ export function SingleElectionOperator({
                     setNewCandidateName(e.target.value);
                     if (candidateError) setCandidateError(null);
                   }}
-                  className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1 text-xs text-slate-900 focus:outline-none focus:border-sky-600"
                 />
 
                 <button
                   type="submit"
-                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-xs shrink-0 cursor-pointer"
+                  className="px-3 py-1 bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold rounded-lg flex items-center gap-1 shadow-xs shrink-0 cursor-pointer"
                 >
                   <Plus size={14} />
                   <span>افزودن</span>
@@ -824,7 +861,7 @@ export function SingleElectionOperator({
               <button
                 type="button"
                 onClick={syncBallotsToVotes}
-                className="flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                className="flex items-center gap-1 text-[11px] text-sky-700 hover:text-sky-800 cursor-pointer"
                 title="تراز کردن تعداد برگه‌ها با بیشترین رأی کاندیدا + باطله"
               >
                 <RefreshCw size={12} />
@@ -858,10 +895,10 @@ export function SingleElectionOperator({
                             <img 
                               src={c.photoUrl} 
                               alt={c.name} 
-                              className="w-8 h-8 rounded-full object-cover border border-slate-300 group-hover/avatar:ring-2 group-hover/avatar:ring-indigo-400 transition-all" 
+                              className="w-8 h-8 rounded-full object-cover border border-slate-300 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400 transition-all" 
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-400 flex items-center justify-center group-hover/avatar:bg-indigo-50 group-hover/avatar:text-indigo-600 transition-colors">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-400 flex items-center justify-center group-hover/avatar:bg-sky-50 group-hover/avatar:text-sky-700 transition-colors">
                               <Camera size={14} />
                             </div>
                           )}
@@ -894,7 +931,7 @@ export function SingleElectionOperator({
                               type="text"
                               value={editingCandidateNameValue}
                               onChange={(e) => setEditingCandidateNameValue(e.target.value)}
-                              className="w-full bg-white border border-indigo-500 rounded px-1.5 py-0.5 text-xs text-slate-900 font-bold"
+                              className="w-full bg-white border border-sky-600 rounded px-1.5 py-0.5 text-xs text-slate-900 font-bold"
                               autoFocus
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') saveEditingCandidateName(c.id);
@@ -904,7 +941,7 @@ export function SingleElectionOperator({
                             <button
                               type="button"
                               onClick={() => saveEditingCandidateName(c.id)}
-                              className="px-1.5 py-0.5 bg-emerald-600 text-white text-[10px] rounded font-bold cursor-pointer shrink-0"
+                              className="px-1.5 py-0.5 bg-slate-700 text-white text-[10px] rounded font-bold cursor-pointer shrink-0"
                             >
                               ذخیره
                             </button>
@@ -922,7 +959,7 @@ export function SingleElectionOperator({
                             <button
                               type="button"
                               onClick={() => startEditingCandidateName(c)}
-                              className="text-slate-400 hover:text-indigo-600 p-0.5 rounded cursor-pointer opacity-70 group-hover:opacity-100 transition-opacity"
+                              className="text-slate-400 hover:text-sky-700 p-0.5 rounded cursor-pointer opacity-70 group-hover:opacity-100 transition-opacity"
                               title="ویرایش نام کاندیدا"
                             >
                               <Edit2 size={11} />
@@ -939,12 +976,12 @@ export function SingleElectionOperator({
                                 min={0}
                                 value={editingCandidateVotes}
                                 onChange={(e) => setEditingCandidateVotes(e.target.value)}
-                                className="w-16 bg-white border border-indigo-500 rounded px-1.5 py-0.5 text-xs text-slate-900 text-center font-bold"
+                                className="w-16 bg-white border border-sky-600 rounded px-1.5 py-0.5 text-xs text-slate-900 text-center font-bold"
                               />
                               <button
                                 type="button"
                                 onClick={() => saveEditingCandidate(c.id)}
-                                className="px-1.5 py-0.5 bg-emerald-600 text-white text-[10px] rounded font-bold cursor-pointer"
+                                className="px-1.5 py-0.5 bg-slate-700 text-white text-[10px] rounded font-bold cursor-pointer"
                               >
                                 ثبت
                               </button>
@@ -978,19 +1015,40 @@ export function SingleElectionOperator({
                       <button
                         type="button"
                         onClick={() => incrementCandidateVote(c.id)}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-xs rounded-lg shadow-xs transition-all cursor-pointer"
-                        title="افزایش یک رأی برای این کاندیدا"
+                        disabled={!canRegister}
+                        className="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 active:scale-95 disabled:opacity-40 text-white font-black text-xs rounded-lg shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
+                        title={canRegister ? 'افزایش یک رأی برای این کاندیدا' : 'سقف کل تعرفه‌ها پر شده است'}
                       >
                         +۱ رأی
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => removeCandidate(c.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                        title="حذف کاندیدا"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {pendingDeleteCandidateId === c.id ? (
+                        <div className="flex items-center gap-1 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg">
+                          <span className="text-rose-900 text-[10px] font-bold">حذف؟</span>
+                          <button
+                            type="button"
+                            onClick={() => removeCandidate(c.id)}
+                            className="px-1.5 py-0.5 bg-rose-600 text-white rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            بله
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteCandidateId(null)}
+                            className="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                          >
+                            خیر
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setPendingDeleteCandidateId(c.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                          title="حذف کاندیدا"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1014,57 +1072,54 @@ export function SingleElectionOperator({
                 ...prev,
                 confidence: { ...prev.confidence, candidateName: e.target.value }
               }))}
-              placeholder="مثال: دکتر علیرضا محمدی (پیشنهاد ریاست هیئت مدیره)"
-              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:border-indigo-500 font-medium"
+              placeholder="مثال: دکتر علیرضا محمدی (پیشنهاد چند منتخب)"
+              className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:border-sky-600 font-medium"
             />
           </div>
 
-          {/* Big Yes / No Fast Voting Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* YES BUTTON */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
+          {/* آری / نه / باطله در یک ردیف */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
+                <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
                   <ThumbsUp size={18} />
-                  <span>آرای موافق (آری)</span>
+                  <span>موافق (آری)</span>
                 </div>
-                <div className="text-2xl font-black text-emerald-900 tabular-nums">
+                <div className="text-2xl font-black text-slate-900 tabular-nums">
                   {election.confidence.yesVotes}
                 </div>
               </div>
-
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={decrementConfidenceYes}
                   disabled={election.confidence.yesVotes <= 0}
-                  className="w-9 h-9 bg-white border border-emerald-300 hover:bg-emerald-100 disabled:opacity-30 rounded-xl flex items-center justify-center text-emerald-900 font-bold cursor-pointer"
+                  className="w-9 h-9 bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-30 rounded-xl flex items-center justify-center text-slate-900 font-bold cursor-pointer"
                 >
                   <Minus size={15} />
                 </button>
                 <button
                   type="button"
                   onClick={incrementConfidenceYes}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  disabled={!canRegister}
+                  className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 disabled:opacity-40 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
                 >
                   <ThumbsUp size={16} />
-                  <span>موافق (آری) ۱+</span>
+                  <span>آری ۱+</span>
                 </button>
               </div>
             </div>
 
-            {/* NO BUTTON */}
             <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-rose-800 font-bold text-sm">
                   <ThumbsDown size={18} />
-                  <span>آرای مخالف (نه)</span>
+                  <span>مخالف (نه)</span>
                 </div>
                 <div className="text-2xl font-black text-rose-900 tabular-nums">
                   {election.confidence.noVotes}
                 </div>
               </div>
-
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1077,10 +1132,42 @@ export function SingleElectionOperator({
                 <button
                   type="button"
                   onClick={incrementConfidenceNo}
-                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  disabled={!canRegister}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 disabled:opacity-40 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
                 >
                   <ThumbsDown size={16} />
-                  <span>مخالف (نه) ۱+</span>
+                  <span>نه ۱+</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-300 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+                  <XCircle size={18} />
+                  <span>باطله / سفید</span>
+                </div>
+                <div className="text-2xl font-black text-slate-900 tabular-nums">
+                  {election.invalidVotes}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={decrementInvalidVote}
+                  disabled={election.invalidVotes <= 0}
+                  className="w-9 h-9 bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-30 rounded-xl flex items-center justify-center text-slate-800 font-bold cursor-pointer"
+                >
+                  <Minus size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={incrementInvalidVote}
+                  disabled={!canRegister}
+                  className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 disabled:opacity-40 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <XCircle size={16} />
+                  <span>باطله ۱+</span>
                 </button>
               </div>
             </div>

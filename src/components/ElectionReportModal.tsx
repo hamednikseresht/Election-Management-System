@@ -67,7 +67,8 @@ export function ElectionReportModal({
         کل_برگه_های_قرائت_شده: countedBallots,
         برگه_های_باطله_و_سفید: invalidVotes,
         مجموع_آرای_صحیح_ماخوذه: isConfidence ? confidenceStats.validVotes : totalValidVotes,
-        تعداد_کرسی_های_منتخب: isConfidence ? 1 : winnersCount
+        تعداد_کرسی_های_منتخب: isConfidence ? 1 : winnersCount,
+        قاعده_اکثریت: isConfidence ? 'اکثریت مطلق' : (competitive.majorityRule === 'absolute' ? 'اکثریت مطلق' : 'اکثریت نسبی'),
       },
       نتایج_کاندیداها: isConfidence
         ? [
@@ -87,7 +88,7 @@ export function ElectionReportModal({
               نام_کاندیدا: c.name,
               تعداد_آرا: c.votes,
               درصد_از_کل_تعرفه_ها: `${pct}٪`,
-              وضعیت: c.status === 'winner' ? 'عضو منتخب اصلی' : (c.status === 'tie' ? 'تساوی کرسی' : (c.status === 'alternate' ? 'عضو علی‌البدل' : 'عدم انتخاب'))
+              وضعیت: c.status === 'winner' ? 'عضو منتخب اصلی' : (c.status === 'tie' ? 'تساوی کرسی' : (c.status === 'short' ? 'کمتر از اکثریت مطلق' : (c.status === 'alternate' ? 'عضو علی‌البدل' : 'عدم انتخاب')))
             };
           }),
       امضاکنندگان_رسمی: [
@@ -120,7 +121,7 @@ export function ElectionReportModal({
         {/* Top Actions Bar (Hidden on print) */}
         <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-3 shrink-0 print:hidden">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
+            <div className="p-2 rounded-xl bg-sky-700 text-white shadow-xs">
               <FileText size={20} />
             </div>
             <div>
@@ -138,7 +139,7 @@ export function ElectionReportModal({
               type="button"
               id="download-report-json-button"
               onClick={handleDownloadJSON}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-xs cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white transition-all shadow-xs cursor-pointer"
               title="ذخیره کامل گزارش و صورتجلسه به صورت فایل JSON"
             >
               <Download size={14} />
@@ -149,7 +150,7 @@ export function ElectionReportModal({
               type="button"
               id="print-report-pdf-button"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-xs cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-sky-700 hover:bg-sky-600 text-white transition-all shadow-xs cursor-pointer"
               title="چاپ صورتجلسه و ذخیره به عنوان فایل PDF"
             >
               <Printer size={14} />
@@ -191,7 +192,7 @@ export function ElectionReportModal({
             <h1 className="text-xl sm:text-2xl font-black text-slate-900 mb-1">
               صورتجلسه رسمی اعلام نتایج انتخابات
             </h1>
-            <h2 className="text-lg sm:text-xl font-extrabold text-indigo-950 mt-1">
+            <h2 className="text-lg sm:text-xl font-extrabold text-sky-950 mt-1">
               {election.title || 'عنوان انتخابات'}
             </h2>
             <div className="text-xs text-slate-600 mt-1 flex items-center justify-center gap-3">
@@ -215,7 +216,7 @@ export function ElectionReportModal({
           {/* Section 1: Statistical Summary */}
           <div className="mb-6">
             <h3 className="text-xs sm:text-sm font-black text-slate-900 mb-2 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+              <span className="w-2 h-2 rounded-md bg-sky-700"></span>
               بخش ۱: خلاصه آمار برگه‌های تعرفه و آرا
             </h3>
             
@@ -228,7 +229,7 @@ export function ElectionReportModal({
               </div>
               <div className="text-center p-2 border-l border-slate-200 last:border-l-0">
                 <div className="text-[11px] text-slate-600 mb-1">برگه‌های قرائت‌شده</div>
-                <div className="text-base sm:text-lg font-black text-indigo-700">
+                <div className="text-base sm:text-lg font-black text-sky-700">
                   {countedBallots.toLocaleString('fa-IR')}
                 </div>
               </div>
@@ -240,9 +241,14 @@ export function ElectionReportModal({
               </div>
               <div className="text-center p-2">
                 <div className="text-[11px] text-slate-600 mb-1">کرسی‌های منتخب رسمی</div>
-                <div className="text-base sm:text-lg font-black text-emerald-700">
+                <div className="text-base sm:text-lg font-black text-slate-800">
                   {isConfidence ? '۱ نفر (اعتماد)' : `${winnersCount.toLocaleString('fa-IR')} نفر`}
                 </div>
+                {!isConfidence && (
+                  <div className="text-[10px] text-slate-500 font-bold mt-0.5">
+                    {competitive.majorityRule === 'absolute' ? 'اکثریت مطلق' : 'اکثریت نسبی'}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -250,7 +256,7 @@ export function ElectionReportModal({
           {/* Section 2: Candidate Results Table */}
           <div className="mb-8">
             <h3 className="text-xs sm:text-sm font-black text-slate-900 mb-2 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+              <span className="w-2 h-2 rounded-md bg-sky-700"></span>
               بخش ۲: جدول رتبه‌بندی قطعی کاندیداها و وضعیت انتخاب
             </h3>
 
@@ -272,13 +278,14 @@ export function ElectionReportModal({
                       const isWinner = candidate.status === 'winner';
                       const isAlternate = candidate.status === 'alternate';
                       const isTie = candidate.status === 'tie';
+                      const isShort = candidate.status === 'short';
                       const percentage = candidate.percentageOfBallots.toFixed(1);
 
                       return (
                         <tr 
                           key={candidate.id}
                           className={`border-b border-slate-200 transition-colors ${
-                            isWinner ? 'bg-indigo-50/50 font-bold' : 'hover:bg-slate-50'
+                            isWinner ? 'bg-sky-50/50 font-bold' : 'hover:bg-slate-50'
                           }`}
                         >
                           <td className="p-2.5 text-center font-black">
@@ -303,20 +310,24 @@ export function ElectionReportModal({
                           <td className="p-2.5 text-center font-black text-slate-900 tabular-nums">
                             {candidate.votes.toLocaleString('fa-IR')}
                           </td>
-                          <td className="p-2.5 text-center font-bold text-indigo-900 tabular-nums">
+                          <td className="p-2.5 text-center font-bold text-sky-900 tabular-nums">
                             {parseFloat(percentage).toLocaleString('fa-IR')}٪
                           </td>
                           <td className="p-2.5 text-center">
                             {isWinner ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-black bg-slate-100 text-slate-800 border border-slate-300">
                                 منتخب اصلی (نفر {candidate.rank})
                               </span>
                             ) : isTie ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
                                 تساوی کرسی
                               </span>
+                            ) : isShort ? (
+                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-slate-200 text-slate-800 border border-slate-300">
+                                کمتر از اکثریت مطلق
+                              </span>
                             ) : isAlternate ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300">
                                 علی‌البدل
                               </span>
                             ) : (
@@ -335,13 +346,13 @@ export function ElectionReportModal({
               /* Confidence vote mode report */
               <div className="border border-slate-300 rounded-2xl p-4 bg-slate-50 print:bg-transparent">
                 <div className="text-base font-bold text-slate-900 mb-3">
-                  موضوع رأی اعتماد: <span className="text-indigo-800">{election.confidence?.candidateName || 'کاندیدا'}</span>
+                  موضوع رأی اعتماد: <span className="text-sky-800">{election.confidence?.candidateName || 'کاندیدا'}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-center">
-                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
-                    <div className="text-xs text-emerald-800 font-bold mb-1">آرای موافق (آری)</div>
-                    <div className="text-2xl font-black text-emerald-700">{yesVotes.toLocaleString('fa-IR')}</div>
-                    <div className="text-xs text-emerald-600 font-semibold mt-1">{parseFloat(yesPercentage).toLocaleString('fa-IR')}٪</div>
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                    <div className="text-xs text-slate-800 font-bold mb-1">آرای موافق (آری)</div>
+                    <div className="text-2xl font-black text-slate-800">{yesVotes.toLocaleString('fa-IR')}</div>
+                    <div className="text-xs text-slate-700 font-semibold mt-1">{parseFloat(yesPercentage).toLocaleString('fa-IR')}٪</div>
                   </div>
                   <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
                     <div className="text-xs text-rose-800 font-bold mb-1">آرای مخالف (نه)</div>
