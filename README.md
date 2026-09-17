@@ -4,16 +4,105 @@
 
 نیازی به اینترنت یا کلید API نیست. همهٔ داده در مرورگر همان رایانه ذخیره می‌شود.
 
-## نصب و اجرا
+## پیش‌نیاز
 
-پیش‌نیاز: [Node.js](https://nodejs.org/) نسخه ۱۸ یا بالاتر.
+- [Node.js](https://nodejs.org/) نسخه **۱۸ یا بالاتر** (پیشنهاد: LTS فعلی)
+- npm که همراه Node نصب می‌شود
+- مرورگر کروم / اج / فایرفاکس به‌روز
+
+بررسی نسخه:
 
 ```bash
+node -v
+npm -v
+```
+
+## نصب محلی
+
+ابتدا مخزن را بگیرید (یا پوشه پروژه را باز کنید):
+
+```bash
+git clone https://github.com/hamednikseresht/Election-Management-System.git
+cd Election-Management-System
+git checkout development
+```
+
+اگر از قبل پوشه را دارید، فقط وارد همان پوشه شوید.
+
+### ویندوز (Windows)
+
+1. Node.js را از [nodejs.org](https://nodejs.org/) نصب کنید (گزینه LTS). هنگام نصب، تیک «Add to PATH» را فعال بگذارید.
+2. **PowerShell** یا **Command Prompt** را باز کنید.
+3. به پوشه پروژه بروید، مثلاً:
+
+```powershell
+cd "$env:USERPROFILE\Downloads\personal\Election Management System"
+```
+
+یا مسیر واقعی پروژه خودتان را بگذارید.
+
+4. وابستگی‌ها و اجرای توسعه:
+
+```powershell
 npm install
 npm run dev
 ```
 
-سپس در مرورگر باز کنید: [http://localhost:3000](http://localhost:3000)
+5. در مرورگر باز کنید: [http://localhost:3000](http://localhost:3000)
+
+توقف سرور: در همان پنجره ترمینال `Ctrl+C`.
+
+اگر `npm` شناخته نشد، ترمینال را ببندید و دوباره باز کنید، یا نصب Node را تکرار کنید.
+
+### لینوکس (Linux)
+
+نصب Node با روش رسمی توزیع خودتان؛ مثال روی اوبونتو و دبیان:
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+node -v
+```
+
+یا با [nvm](https://github.com/nvm-sh/nvm):
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+# ترمینال را دوباره باز کنید
+nvm install --lts
+```
+
+سپس:
+
+```bash
+cd Election-Management-System   # یا مسیر پروژه
+npm install
+npm run dev
+```
+
+مرورگر: [http://localhost:3000](http://localhost:3000)
+
+توقف: `Ctrl+C`.
+
+### دستورهای مشترک
+
+| دستور | کار |
+| --- | --- |
+| `npm install` | نصب وابستگی‌ها |
+| `npm run dev` | اجرای توسعه روی پورت ۳۰۰۰ |
+| `npm run build` | ساخت نسخه نهایی در `dist/` |
+| `npm run preview` | پیش‌نمایش نسخهٔ ساخته‌شده |
+| `npm test` | تست واحد |
+| `npm run lint` | بررسی TypeScript |
+
+ساخت نسخهٔ نهایی برای اجرا بدون سرور توسعه:
+
+```bash
+npm run build
+npm run preview
+```
+
+## صفحات برنامه
 
 | صفحه | آدرس | کاربرد |
 | --- | --- | --- |
@@ -21,19 +110,7 @@ npm run dev
 | پیش‌نمایش سالن | دکمه «پیش‌نمایش سالن» | دیدن خروجی قبل از پروژکتور |
 | نمایشگر پروژکتور | `/?view=display` یا دکمه «مانیتور دوم» | تمام‌صفحه برای سالن |
 
-ساخت نسخهٔ نهایی:
-
-```bash
-npm run build
-npm run preview
-```
-
-بررسی صحت فرمول شمارش و نوع‌ها:
-
-```bash
-npm test
-npm run lint
-```
+در نمایشگر سالن، یک انتخابات حداکثر حدود نیمی از عرض صفحه را می‌گیرد؛ دو انتخابات همزمان هر کدام نصف عرض را دارند. فونت فارسی از پکیج محلی **Vazirmatn FD** بارگذاری می‌شود (بدون نیاز به اینترنت برای فونت).
 
 ## آموزش کار در روز مجمع
 
@@ -58,9 +135,9 @@ npm run lint
 
 ### ۳. ثبت تعرفه در حالت رقابتی
 
-روی یک برگه ممکن است نام یک یا چند کاندیدا باشد.
+روی یک برگه حداکثر به تعداد **نفرات منتخب** می‌توان نام نوشت (کمتر یا مساوی). انتخاب بیشتر در پنل قفل می‌شود.
 
-1. نام‌های همان برگه را انتخاب کنید.
+1. نام‌های همان برگه را انتخاب کنید (تا سقف نفرات منتخب).
 2. «ثبت این برگه رأی» را بزنید. به هر نام انتخاب‌شده یک رأی و به تعداد تعرفه‌ها یک برگه اضافه می‌شود.
 3. اگر برگه سفید یا مخدوش است «برگه باطله / سفید» را بزنید.
 4. اگر اشتباه ثبت شد «بازگشت آخرین تعرفه» را بزنید.
@@ -140,7 +217,7 @@ PIN فقط جلوی دستکاری اتفاقی روی رایانهٔ اپرات
 
 ساختار مهم کد:
 
-- `src/utils/electionStats.ts` — فرمول مشترک درصد، حد نصاب، تساوی، Undo
+- `src/utils/electionStats.ts` — فرمول مشترک درصد، حد نصاب، تساوی، Undo، سقف نام روی تعرفه
 - `src/utils/persist.ts` — IndexedDB و مهاجرت از localStorage
 - `src/utils/pin.ts` — هش و نشست PIN اپراتور
 - `src/components/BallotRecorder.tsx` — ثبت، بازگشت تعرفه و میانبر کیبورد
@@ -148,3 +225,4 @@ PIN فقط جلوی دستکاری اتفاقی روی رایانهٔ اپرات
 - `src/components/SingleElectionOperator.tsx` — پنل اپراتور
 - `src/components/SingleElectionDisplay.tsx` — نمایشگر نتایج
 - `src/App.tsx` — ذخیره محلی و همگام‌سازی پنجره‌ها
+- `design-system/` — قواعد رنگ و UI (سبز برای موفقیت، آبی برای CTA)

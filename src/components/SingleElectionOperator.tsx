@@ -376,7 +376,7 @@ export function SingleElectionOperator({
               onClick={handleToggleActive}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-xs cursor-pointer ${
                 election.active 
-                  ? 'bg-slate-700 hover:bg-slate-600 text-white' 
+                  ? 'bg-emerald-700 hover:bg-emerald-600 text-white' 
                   : 'bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300'
               }`}
             >
@@ -1079,13 +1079,13 @@ export function SingleElectionOperator({
 
           {/* آری / نه / باطله در یک ردیف */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex flex-col justify-between gap-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
                   <ThumbsUp size={18} />
                   <span>موافق (آری)</span>
                 </div>
-                <div className="text-2xl font-black text-slate-900 tabular-nums">
+                <div className="text-2xl font-black text-emerald-900 tabular-nums">
                   {election.confidence.yesVotes}
                 </div>
               </div>
@@ -1102,7 +1102,7 @@ export function SingleElectionOperator({
                   type="button"
                   onClick={incrementConfidenceYes}
                   disabled={!canRegister}
-                  className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-800 disabled:opacity-40 text-white font-black text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
+                  className="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 disabled:opacity-40 text-white font-bold text-sm rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed"
                 >
                   <ThumbsUp size={16} />
                   <span>آری ۱+</span>

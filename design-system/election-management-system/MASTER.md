@@ -20,13 +20,11 @@
 |------|-----|--------|
 | Brand / Ink | `#0F172A` | Headers, primary dark actions, election-2 accents |
 | Accent | `#0369A1` | Primary CTA, election-1 accents, focus rings |
-| Canvas | `#F8FAFC` | Page background |
-| Surface | `#FFFFFF` | Panels |
-| Line | `#E2E8F0` | Borders |
+| Success | `#047857` | Active, winners, yes votes, sync/save success |
 | Danger | `#B91C1C` | Destructive / invalid / “no” only |
 | Warn | `#A16207` | Rare warnings (PIN lock) |
 
-**Rule:** Do not introduce teal, emerald, indigo, purple, or extra blues. Differentiate dual elections with **sky vs slate**, not two bright accent families.
+**Rule:** Keep sky for brand actions. Use **green only for positive/success** signals. Do not introduce purple or extra blues. Differentiate dual elections with **sky vs slate**.
 
 ### Typography
 
