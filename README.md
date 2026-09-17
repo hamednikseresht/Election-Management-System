@@ -1,20 +1,28 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# سامانه مدیریت انتخابات
 
-# Run and deploy your AI Studio app
+پنل شمارش تعرفه و نمایشگر سالن برای انتخابات مجمع. از یک یا دو انتخابات همزمان پشتیبانی می‌کند.
 
-This contains everything you need to run your app locally.
+## اجرا
 
-View your app in AI Studio: https://ai.studio/apps/79231819-4344-4817-b2f4-d7b33428056a
+پیش‌نیاز: [Node.js](https://nodejs.org/)
 
-## Run Locally
+```bash
+npm install
+npm run dev
+```
 
-**Prerequisites:**  Node.js
+برنامه روی [http://localhost:3000](http://localhost:3000) باز می‌شود.
 
+| صفحه | آدرس |
+| --- | --- |
+| پنل اپراتور | `/` |
+| نمایشگر سالن / پروژکتور | `/?view=display` |
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+داده‌ها در مرورگر ذخیره می‌شوند و به کلید API نیاز نیست.
+
+## ساخت نسخهٔ نهایی
+
+```bash
+npm run build
+npm run preview
+```

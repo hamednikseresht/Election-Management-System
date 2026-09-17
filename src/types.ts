@@ -4,7 +4,7 @@ export interface Candidate {
   id: string;
   name: string;
   votes: number;
-  photoUrl?: string; // عکس کاندیدا (Base64 یا لینک)
+  photoUrl?: string;
 }
 
 export interface ConfidenceVoteData {
@@ -13,19 +13,27 @@ export interface ConfidenceVoteData {
   noVotes: number;
 }
 
+export interface BallotLogEntry {
+  id: string;
+  at: string;
+  kind: 'valid' | 'invalid';
+  candidateIds: string[];
+}
+
 export interface SingleElection {
   id: 'election1' | 'election2';
   title: string;
   type: ElectionType;
-  totalVotes: number; // کل تعرفه‌ها / برگه‌های مأخوذه (در صورت مشخص بودن سقف)
-  isTotalBallotsKnown?: boolean; // آیا سقف کل برگه‌های مأخوذه مشخص است یا نامشخص/پویا است؟
-  countedBallots?: number; // تعداد تعرفه‌ها / برگه‌های قرائت‌شده تا این لحظه
-  invalidVotes: number; // برگه‌های باطله و سفید
-  winnersCount: number; // تعداد نفرات منتخب
+  totalVotes: number;
+  isTotalBallotsKnown?: boolean;
+  countedBallots?: number;
+  invalidVotes: number;
+  winnersCount: number;
   candidates: Candidate[];
   confidence: ConfidenceVoteData;
-  active: boolean; // فعال یا غیرفعال بودن این انتخابات
-  concludedAt?: string; // تاریخ و ساعت رسمی پایان رأی‌گیری
+  active: boolean;
+  concludedAt?: string;
+  ballotLog?: BallotLogEntry[];
 }
 
 export type DisplayMode = 'dual' | 'single-1' | 'single-2';
@@ -39,5 +47,4 @@ export interface MultiElectionData {
   election2: SingleElection;
 }
 
-// Backward compatibility alias
 export type ElectionData = MultiElectionData;
