@@ -10,7 +10,6 @@ import {
 interface OperatorTabProps {
   data: MultiElectionData;
   setData: Dispatch<SetStateAction<MultiElectionData>>;
-  onBroadcastSync?: () => void;
 }
 
 export function OperatorTab({ data, setData }: OperatorTabProps) {

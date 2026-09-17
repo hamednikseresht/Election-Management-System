@@ -1,5 +1,6 @@
 import { SingleElection } from '../types';
 import type { ReactNode } from 'react';
+import { getCompetitiveStats, getConfidenceStats, isElectionLocked } from '../utils/electionStats';
 import { 
   Users, CheckCircle, XCircle, ShieldCheck, 
   ThumbsUp, ThumbsDown, Award, AlertCircle, User
@@ -70,51 +71,42 @@ interface SingleElectionDisplayProps {
   theme: DisplayThemeConfig;
   isHalfScreen?: boolean;
   isDualMode?: boolean;
+  variant?: 'preview' | 'hall';
 }
 
 export function SingleElectionDisplay({ 
   election, 
   theme, 
-  isHalfScreen = false,
-  isDualMode = false
+  isHalfScreen: _isHalfScreen = false,
+  isDualMode = false,
+  variant = 'preview',
 }: SingleElectionDisplayProps) {
+  const isHall = variant === 'hall';
   const isConfidenceMode = election.type === 'confidence';
-  const isTotalBallotsKnown = election.isTotalBallotsKnown ?? true;
+  const competitive = getCompetitiveStats(election);
+  const confidenceStats = getConfidenceStats(election);
+  const locked = isElectionLocked(election);
 
-  const totalVotes = typeof election.totalVotes === 'number' ? election.totalVotes : 0;
-  const invalidVotes = typeof election.invalidVotes === 'number' ? election.invalidVotes : 0;
-  const candidates = Array.isArray(election.candidates) ? election.candidates : [];
-  const confidence = election.confidence || { candidateName: 'شخص معرفی شده', yesVotes: 0, noVotes: 0 };
+  const {
+    invalidVotes,
+    totalCandidateMarks: validVotesCompetitive,
+    countedBallots,
+    countedPercentage,
+    isTotalBallotsKnown,
+    totalVotes,
+    averageNamesPerBallot,
+    ranked: sortedCandidates,
+    hasSeatTie,
+  } = competitive;
 
-  // Competitive calculations
-  const validVotesCompetitive = candidates.reduce((sum, c) => sum + (c.votes || 0), 0);
-  const sortedCandidates = [...candidates].sort((a, b) => b.votes - a.votes);
-  const maxCandidateVotes = sortedCandidates.length > 0 ? sortedCandidates[0].votes : 0;
-
-  // Ballots logic
-  const minRequiredBallots = maxCandidateVotes + invalidVotes;
-  const countedBallots = typeof election.countedBallots === 'number'
-    ? Math.max(election.countedBallots, minRequiredBallots)
-    : minRequiredBallots;
-
-  // Ballot base for percentage of voters/ballots who voted for this candidate
-  const ballotBase = countedBallots > 0 ? countedBallots : (totalVotes > 0 ? totalVotes : 1);
-
-  // Confidence calculations
-  const yesVotes = typeof confidence.yesVotes === 'number' ? confidence.yesVotes : 0;
-  const noVotes = typeof confidence.noVotes === 'number' ? confidence.noVotes : 0;
-  const validVotesConfidence = yesVotes + noVotes;
-  const totalCountedConfidence = validVotesConfidence + invalidVotes;
-
-  const isApproved = totalVotes > 0 && yesVotes > Math.floor(totalVotes / 2);
-  const isCountingComplete = totalVotes > 0 && totalCountedConfidence >= totalVotes;
-
-  const yesPercentage = totalVotes > 0 
-    ? ((yesVotes / totalVotes) * 100).toFixed(1) 
-    : '0';
-  const noPercentage = totalVotes > 0 
-    ? ((noVotes / totalVotes) * 100).toFixed(1) 
-    : '0';
+  const {
+    yesVotes,
+    noVotes,
+    yesPercentage,
+    noPercentage,
+    requiredYes,
+    outcome,
+  } = confidenceStats;
 
   if (!election.active) {
     return (
@@ -136,7 +128,11 @@ export function SingleElectionDisplay({
   }
 
   return (
-    <div className={`w-full rounded-3xl border ${theme.borderAccent} bg-white text-slate-900 ${theme.glowShadow} p-4 sm:p-6 flex flex-col transition-all duration-300`}>
+    <div className={`w-full rounded-3xl border p-4 sm:p-6 flex flex-col transition-all duration-300 ${
+      isHall
+        ? 'bg-slate-900 text-slate-50 border-slate-700'
+        : `${theme.borderAccent} bg-white text-slate-900 ${theme.glowShadow}`
+    }`}>
       
       {/* Election Header Box */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-4 mb-5">
@@ -150,6 +146,11 @@ export function SingleElectionDisplay({
           <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full text-slate-600 bg-slate-100 border border-slate-200">
             {isConfidenceMode ? 'رأی اعتماد' : 'چند کاندیدا'}
           </span>
+          {locked && (
+            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+              شمارش قفل است
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -212,7 +213,7 @@ export function SingleElectionDisplay({
               title="مجموع آرای کاندیداها" 
               value={`${validVotesCompetitive.toLocaleString('fa-IR')}`} 
               subtitle={countedBallots > 0 
-                ? `میانگین ${(validVotesCompetitive / Math.max(1, countedBallots - invalidVotes)).toFixed(1)} نام در هر برگه` 
+                ? `میانگین ${averageNamesPerBallot.toFixed(1)} نام در هر برگه` 
                 : 'کل انتخاب‌های ثبت‌شده'}
               icon={<Award size={17} className="text-emerald-600" />}
               gradient="from-emerald-50 to-white"
@@ -229,7 +230,7 @@ export function SingleElectionDisplay({
                   پیشرفت قرائت تعرفه‌ها (برگه‌های رأی):
                 </span>
                 <span className="font-black text-slate-900">
-                  {countedBallots.toLocaleString('fa-IR')} از {totalVotes.toLocaleString('fa-IR')} برگه ({Math.min(100, Math.round((countedBallots / totalVotes) * 100)).toLocaleString('fa-IR')}٪)
+                  {countedBallots.toLocaleString('fa-IR')} از {totalVotes.toLocaleString('fa-IR')} برگه ({countedPercentage.toLocaleString('fa-IR')}٪)
                 </span>
               </div>
               <div className="w-full h-2.5 rounded-full overflow-hidden bg-slate-200">
@@ -243,24 +244,24 @@ export function SingleElectionDisplay({
 
           {/* Candidate Bars */}
           <div className="flex flex-col gap-2.5 flex-1">
-            {sortedCandidates.map((candidate, index) => {
-              const isWinner = index < (election.winnersCount || 1);
-              
-              // Percentage of ballot papers that contain this candidate's name
-              const percentageOfBallots = ballotBase > 0 
-                ? ((candidate.votes / ballotBase) * 100).toFixed(1) 
-                : '0.0';
-              
-              // Visual width proportional to the highest candidate
-              const barWidth = maxCandidateVotes > 0 
-                ? Math.max(4, (candidate.votes / maxCandidateVotes) * 100) 
-                : 4;
+            {hasSeatTie && (
+              <div className="mb-2 text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                تساوی در کسب کرسی: بدون تصمیم هیئت رئیسه، منتخب نهایی از میان نامزدهای هم‌رأی مشخص نمی‌شود.
+              </div>
+            )}
+            {sortedCandidates.map((candidate) => {
+              const isWinner = candidate.status === 'winner';
+              const isTie = candidate.status === 'tie';
+              const percentageOfBallots = candidate.percentageOfBallots.toFixed(1);
+              const barWidth = candidate.barWidth;
 
               return (
                 <div
                   key={candidate.id}
                   className={`relative overflow-hidden rounded-2xl border transition-all duration-300 ${
-                    isWinner 
+                    isTie
+                      ? 'bg-amber-50 border-amber-300 shadow-sm'
+                      : isWinner 
                       ? `${theme.winnerRowBg} ${theme.winnerBorder} shadow-sm` 
                       : 'bg-slate-50/80 border-slate-200'
                   } p-3 sm:p-3.5 flex flex-col justify-center`}
@@ -282,7 +283,7 @@ export function SingleElectionDisplay({
                         ? `${theme.badgeBg} ${theme.tagColor} border ${theme.badgeBorder}`
                         : 'bg-slate-200 text-slate-700'
                     }`}>
-                      <span className="text-base font-black">{(index + 1).toLocaleString('fa-IR')}</span>
+                      <span className="text-base font-black">{candidate.rank.toLocaleString('fa-IR')}</span>
                     </div>
 
                     {/* Candidate Photo / Avatar */}
@@ -307,7 +308,12 @@ export function SingleElectionDisplay({
                         </h4>
                         {isWinner && (
                           <span className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full ${theme.winnerBadge} border`}>
-                            منتخب ({index + 1})
+                            منتخب ({candidate.rank})
+                          </span>
+                        )}
+                        {isTie && (
+                          <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                            تساوی کرسی
                           </span>
                         )}
                       </div>
@@ -355,10 +361,10 @@ export function SingleElectionDisplay({
               <span>موضوع رأی اعتماد</span>
             </div>
             <h3 className="text-xl sm:text-2xl font-black mb-1 text-slate-900">
-              {confidence.candidateName || 'شخص معرفی شده'}
+              {election.confidence.candidateName || 'شخص معرفی شده'}
             </h3>
             <p className="text-xs text-slate-600">
-              حد نصاب قانونی: کسب اکثریت مطلق آرا (حداقل {Math.floor(totalVotes / 2) + 1} رأی موافق)
+              حد نصاب قانونی: کسب اکثریت مطلق آرا (حداقل {requiredYes.toLocaleString('fa-IR')} رأی موافق)
             </p>
           </div>
 
@@ -407,10 +413,10 @@ export function SingleElectionDisplay({
             <div className="flex justify-between items-center mb-2.5">
               <div className="flex items-center gap-1.5 font-bold text-sm sm:text-base text-emerald-700">
                 <ThumbsUp size={16} />
-                <span>موافق: {parseFloat(yesPercentage).toLocaleString('fa-IR')}٪ ({yesVotes.toLocaleString('fa-IR')} رأی)</span>
+                <span>موافق: {yesPercentage.toFixed(1).toLocaleString()}٪ ({yesVotes.toLocaleString('fa-IR')} رأی)</span>
               </div>
               <div className="flex items-center gap-1.5 font-bold text-sm sm:text-base text-rose-700">
-                <span>مخالف: {parseFloat(noPercentage).toLocaleString('fa-IR')}٪ ({noVotes.toLocaleString('fa-IR')} رأی)</span>
+                <span>مخالف: {noPercentage.toFixed(1).toLocaleString()}٪ ({noVotes.toLocaleString('fa-IR')} رأی)</span>
                 <ThumbsDown size={16} />
               </div>
             </div>
@@ -419,7 +425,7 @@ export function SingleElectionDisplay({
             <div className="w-full h-10 rounded-xl overflow-hidden flex p-1 border border-slate-300 bg-slate-200 shadow-inner">
               <div 
                 className="h-full bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-lg flex items-center justify-center font-black text-white text-xs shadow-xs transition-all duration-500 ease-out"
-                style={{ width: `${Math.max(yesVotes > 0 ? 5 : 0, parseFloat(yesPercentage))}%` }}
+                style={{ width: `${Math.max(yesVotes > 0 ? 5 : 0, yesPercentage)}%` }}
               >
                 {yesVotes > 0 && `${yesVotes.toLocaleString('fa-IR')}`}
               </div>
@@ -428,7 +434,7 @@ export function SingleElectionDisplay({
 
               <div 
                 className="h-full bg-gradient-to-l from-rose-600 to-rose-500 rounded-lg flex items-center justify-center font-black text-white text-xs mr-auto shadow-xs transition-all duration-500 ease-out"
-                style={{ width: `${Math.max(noVotes > 0 ? 5 : 0, parseFloat(noPercentage))}%` }}
+                style={{ width: `${Math.max(noVotes > 0 ? 5 : 0, noPercentage)}%` }}
               >
                 {noVotes > 0 && `${noVotes.toLocaleString('fa-IR')}`}
               </div>
@@ -437,29 +443,30 @@ export function SingleElectionDisplay({
 
           {/* Outcome Badge */}
           <div className={`rounded-2xl p-4 border text-center flex items-center justify-center gap-3 ${
-            isApproved 
+            outcome === 'approved' 
               ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-sm' 
               : 'bg-slate-100 border-slate-200 text-slate-800'
           }`}>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              isApproved 
+              outcome === 'approved' 
                 ? 'bg-emerald-500/20 text-emerald-600' 
-                : isCountingComplete 
+                : outcome === 'rejected' 
                   ? 'bg-rose-500/20 text-rose-600' 
                   : 'bg-amber-500/20 text-amber-600'
             }`}>
-              {isApproved ? <CheckCircle size={24} /> : isCountingComplete ? <AlertCircle size={24} /> : <ShieldCheck size={24} />}
+              {outcome === 'approved' ? <CheckCircle size={24} /> : outcome === 'rejected' ? <AlertCircle size={24} /> : <ShieldCheck size={24} />}
             </div>
             <div className="text-right">
               <div className="text-[10px] uppercase font-semibold text-slate-500">
                 وضعیت حد نصاب قانونی
               </div>
               <div className="text-sm sm:text-base font-black text-slate-900">
-                {isApproved 
+                {outcome === 'approved' 
                   ? 'رأی اعتماد مورد تأیید قرار گرفت (کسب اکثریت مطلق)' 
-                  : isCountingComplete 
+                  : outcome === 'rejected' 
                     ? 'رأی اعتماد احراز نگردید' 
-                    : `در حال شمارش (حداقل ${Math.floor(totalVotes / 2) + 1} رأی موافق لازم است)`}
+                    : `در حال شمارش (حداقل ${requiredYes.toLocaleString('fa-IR')} رأی موافق لازم است)`}
+                {locked ? ' — شمارش قفل شده است' : ''}
               </div>
             </div>
           </div>

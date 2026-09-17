@@ -1,139 +1,23 @@
 import { useEffect, useState, useRef, type ChangeEvent } from 'react';
-import { MultiElectionData, SingleElection, DisplayMode, ElectionType, Candidate } from './types';
+import { MultiElectionData } from './types';
 import { OperatorTab } from './components/OperatorTab';
 import { DisplayTab } from './components/DisplayTab';
+import { defaultMultiElectionData, normalizeElectionData } from './utils/normalize';
+import { createId } from './utils/ids';
+import { isTrustedMessage, postToWindow } from './utils/syncOrigin';
 import { 
   Vote, MonitorPlay, Maximize2, Minimize2, 
   ExternalLink, Download, Upload,
   RefreshCw, Check
 } from 'lucide-react';
 
+export { defaultMultiElectionData, normalizeElectionData };
+
 const STORAGE_KEY = 'multi_election_app_data_v2';
 const LEGACY_STORAGE_KEY = 'election_app_data_v1';
 const SYNC_CHANNEL_NAME = 'multi_election_sync_channel';
 
-export const defaultSingleElection1: SingleElection = {
-  id: 'election1',
-  title: 'انتخابات انجمن اخترشناسی شیراز 1405',
-  type: 'candidates',
-  totalVotes: 100,
-  isTotalBallotsKnown: true,
-  countedBallots: 45,
-  invalidVotes: 2,
-  winnersCount: 3,
-  candidates: [
-    { id: '1-1', name: 'دکتر علیرضا محمدی', votes: 34 },
-    { id: '1-2', name: 'مهندس سارا احمدی', votes: 28 },
-    { id: '1-3', name: 'دکتر رضا کریمی', votes: 19 },
-    { id: '1-4', name: 'محمد حسینی', votes: 12 },
-  ],
-  confidence: {
-    candidateName: 'دکتر علیرضا محمدی',
-    yesVotes: 64,
-    noVotes: 22,
-  },
-  active: true,
-};
-
-export const defaultSingleElection2: SingleElection = {
-  id: 'election2',
-  title: 'انتخابات دوم',
-  type: 'candidates',
-  totalVotes: 100,
-  isTotalBallotsKnown: true,
-  countedBallots: 55,
-  invalidVotes: 1,
-  winnersCount: 1,
-  candidates: [
-    { id: '2-1', name: 'مهندس فرشید ناصری', votes: 45 },
-    { id: '2-2', name: 'خانم الهام رستمی', votes: 38 },
-    { id: '2-3', name: 'حسین جلالی', votes: 16 },
-  ],
-  confidence: {
-    candidateName: 'مهندس فرشید ناصری',
-    yesVotes: 71,
-    noVotes: 18,
-  },
-  active: true,
-};
-
-export const defaultMultiElectionData: MultiElectionData = {
-  version: 2,
-  electionScope: 'single',
-  displayMode: 'single-1',
-  election1: defaultSingleElection1,
-  election2: defaultSingleElection2,
-};
-
-function normalizeSingleElection(raw: any, defaultElection: SingleElection): SingleElection {
-  if (!raw || typeof raw !== 'object') return defaultElection;
-
-  const rawType: ElectionType = raw.type === 'confidence' ? 'confidence' : 'candidates';
-  const rawCandidates: Candidate[] = Array.isArray(raw.candidates) 
-    ? raw.candidates.map((c: any, index: number) => ({
-        id: String(c?.id || `c-${index}-${Date.now()}`),
-        name: typeof c?.name === 'string' ? c.name : '',
-        votes: typeof c?.votes === 'number' && !isNaN(c.votes) ? Math.max(0, c.votes) : 0,
-        photoUrl: typeof c?.photoUrl === 'string' ? c.photoUrl : undefined,
-      }))
-    : defaultElection.candidates;
-
-  const rawConfidence = raw.confidence && typeof raw.confidence === 'object' ? raw.confidence : {};
-
-  return {
-    id: defaultElection.id,
-    // Preserve empty string if user cleared the title
-    title: typeof raw.title === 'string' ? raw.title : defaultElection.title,
-    type: rawType,
-    totalVotes: typeof raw.totalVotes === 'number' && !isNaN(raw.totalVotes) ? Math.max(0, raw.totalVotes) : 0,
-    isTotalBallotsKnown: typeof raw.isTotalBallotsKnown === 'boolean' ? raw.isTotalBallotsKnown : true,
-    countedBallots: typeof raw.countedBallots === 'number' && !isNaN(raw.countedBallots) ? Math.max(0, raw.countedBallots) : 0,
-    invalidVotes: typeof raw.invalidVotes === 'number' && !isNaN(raw.invalidVotes) ? Math.max(0, raw.invalidVotes) : 0,
-    winnersCount: typeof raw.winnersCount === 'number' && !isNaN(raw.winnersCount) ? Math.max(1, raw.winnersCount) : defaultElection.winnersCount,
-    candidates: rawCandidates,
-    confidence: {
-      candidateName: typeof rawConfidence.candidateName === 'string' ? rawConfidence.candidateName : defaultElection.confidence.candidateName,
-      yesVotes: typeof rawConfidence.yesVotes === 'number' && !isNaN(rawConfidence.yesVotes) ? Math.max(0, rawConfidence.yesVotes) : 0,
-      noVotes: typeof rawConfidence.noVotes === 'number' && !isNaN(rawConfidence.noVotes) ? Math.max(0, rawConfidence.noVotes) : 0,
-    },
-    active: typeof raw.active === 'boolean' ? raw.active : true,
-    concludedAt: typeof raw.concludedAt === 'string' ? raw.concludedAt : undefined,
-  };
-}
-
-export function normalizeElectionData(raw: any): MultiElectionData {
-  if (!raw || typeof raw !== 'object') return defaultMultiElectionData;
-
-  // If already v2 MultiElectionData
-  if (raw.version === 2 || (raw.election1 && raw.election2)) {
-    const rawScope = raw.electionScope === 'dual' ? 'dual' : 'single';
-    const displayMode: DisplayMode = ['dual', 'single-1', 'single-2'].includes(raw.displayMode)
-      ? raw.displayMode
-      : (rawScope === 'single' ? 'single-1' : 'dual');
-
-    return {
-      version: 2,
-      electionScope: rawScope,
-      displayMode,
-      election1: normalizeSingleElection(raw.election1, defaultSingleElection1),
-      election2: normalizeSingleElection(raw.election2, defaultSingleElection2),
-    };
-  }
-
-  // If legacy v1 Single Election format
-  return {
-    version: 2,
-    electionScope: 'single',
-    displayMode: 'single-1',
-    election1: normalizeSingleElection(raw, defaultSingleElection1),
-    election2: defaultSingleElection2,
-  };
-}
-
-// Generate stable client ID for this tab session to filter out echoes
-const TAB_CLIENT_ID = typeof window !== 'undefined' 
-  ? 'tab_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36)
-  : 'server';
+const TAB_CLIENT_ID = typeof window !== 'undefined' ? createId('tab') : 'server';
 
 export default function App() {
   const isDisplayUrl = typeof window !== 'undefined' && window.location.search.includes('view=display');
@@ -197,7 +81,7 @@ export default function App() {
     // 3. Popup window
     if (popupWindowRef.current && !popupWindowRef.current.closed) {
       try {
-        popupWindowRef.current.postMessage(message, '*');
+        postToWindow(popupWindowRef.current, message);
       } catch {
         // ignore
       }
@@ -238,7 +122,7 @@ export default function App() {
 
     if (window.opener && !window.opener.closed) {
       try {
-        window.opener.postMessage(reqMessage, '*');
+        postToWindow(window.opener, reqMessage);
       } catch {}
     }
 
@@ -298,6 +182,7 @@ export default function App() {
     window.addEventListener('storage', handleStorageChange);
 
     const handleMessage = (e: MessageEvent) => {
+      if (!isTrustedMessage(e)) return;
       if (e.data?.senderId === TAB_CLIENT_ID) return;
 
       if (e.data?.type === 'SYNC_DATA' && e.data?.payload) {
@@ -309,12 +194,12 @@ export default function App() {
         }
       } else if (e.data?.type === 'REQUEST_DATA') {
         if (e.source && 'postMessage' in e.source) {
-          (e.source as Window).postMessage({
+          postToWindow(e.source as Window, {
             type: 'SYNC_DATA',
             payload: dataRef.current,
             senderId: TAB_CLIENT_ID,
             timestamp: Date.now()
-          }, '*');
+          });
         }
       }
     };
@@ -327,7 +212,7 @@ export default function App() {
       }
       if (window.opener && !window.opener.closed) {
         try {
-          window.opener.postMessage({ type: 'REQUEST_DATA', senderId: TAB_CLIENT_ID, timestamp: Date.now() }, '*');
+          postToWindow(window.opener, { type: 'REQUEST_DATA', senderId: TAB_CLIENT_ID, timestamp: Date.now() });
         } catch {}
       }
     }
@@ -383,12 +268,12 @@ export default function App() {
     const sendPulse = () => {
       if (popup && !popup.closed) {
         try {
-          popup.postMessage({ 
+          postToWindow(popup, { 
             type: 'SYNC_DATA', 
             payload: dataRef.current,
             senderId: TAB_CLIENT_ID,
             timestamp: Date.now()
-          }, '*');
+          });
         } catch {}
       }
     };
@@ -420,6 +305,9 @@ export default function App() {
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed && typeof parsed === 'object') {
+          if (!window.confirm('بازیابی این فایل، داده‌های فعلی هر دو انتخابات را جایگزین می‌کند. ادامه می‌دهید؟')) {
+            return;
+          }
           setData(normalizeElectionData(parsed));
         }
       } catch {
@@ -430,18 +318,9 @@ export default function App() {
     e.target.value = '';
   };
 
-  const setDisplayMode = (mode: DisplayMode) => {
-    setData(prev => ({
-      ...prev,
-      displayMode: mode
-    }));
-  };
-
-  // If this window is the Second Monitor / Projector URL (?view=display):
-  // Show ONLY DisplayTab with the single sync button, NO operator controls!
   if (isDisplayUrl) {
     return (
-      <div className="h-screen w-screen flex flex-col font-sans overflow-hidden select-none bg-slate-100 text-slate-900">
+      <div className="h-screen w-screen flex flex-col font-sans overflow-hidden select-none bg-slate-950 text-slate-50">
         {syncFeedback && (
           <div className="bg-emerald-600 text-white text-xs font-bold py-1 px-4 text-center flex items-center justify-center gap-1.5 shadow-md z-[60] animate-in fade-in duration-200">
             <Check size={14} />
@@ -451,7 +330,7 @@ export default function App() {
         <main className="flex-1 overflow-hidden relative">
           <DisplayTab 
             data={data} 
-            onRefreshData={refreshFromSource}
+            isProjector
           />
         </main>
       </div>
@@ -581,7 +460,6 @@ export default function App() {
           <OperatorTab 
             data={data} 
             setData={setData} 
-            onBroadcastSync={broadcastSync}
           />
         ) : (
           <DisplayTab 

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { SingleElection } from '../types';
+import { getCompetitiveStats, getConfidenceStats } from '../utils/electionStats';
 import { 
-  Printer, Download, X, Award, CheckCircle2, 
-  FileText, Calendar, Clock, Vote, UserCheck
+  Printer, Download, X, FileText, Calendar, Clock
 } from 'lucide-react';
 
 interface ElectionReportModalProps {
@@ -20,7 +20,7 @@ export function ElectionReportModal({
 
   if (!isOpen) return null;
 
-  const now = new Date();
+  const now = election.concludedAt ? new Date(election.concludedAt) : new Date();
   const persianDate = new Intl.DateTimeFormat('fa-IR', { 
     dateStyle: 'full' 
   }).format(now);
@@ -29,24 +29,23 @@ export function ElectionReportModal({
   }).format(now);
   const reportNumber = `ELC-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  const countedBallots = election.countedBallots ?? 0;
-  const totalVotes = election.totalVotes;
-  const invalidVotes = election.invalidVotes;
-  const isTotalBallotsKnown = election.isTotalBallotsKnown ?? true;
-  const ballotBase = isTotalBallotsKnown && totalVotes > 0 ? totalVotes : countedBallots;
-
-  const sortedCandidates = [...election.candidates].sort((a, b) => b.votes - a.votes);
+  const competitive = getCompetitiveStats(election);
+  const confidenceStats = getConfidenceStats(election);
+  const countedBallots = competitive.countedBallots;
+  const totalVotes = competitive.totalVotes;
+  const invalidVotes = competitive.invalidVotes;
+  const isTotalBallotsKnown = competitive.isTotalBallotsKnown;
+  const ballotBase = countedBallots > 0 ? countedBallots : 1;
+  const sortedCandidates = competitive.ranked;
   const winnersCount = election.winnersCount || 1;
-  const totalValidVotes = sortedCandidates.reduce((acc, c) => acc + c.votes, 0);
+  const totalValidVotes = competitive.totalCandidateMarks;
 
-  // Confidence Vote stats
   const isConfidence = election.type === 'confidence';
-  const yesVotes = election.confidence?.yesVotes || 0;
-  const noVotes = election.confidence?.noVotes || 0;
-  const confTotal = yesVotes + noVotes;
-  const yesPercentage = confTotal > 0 ? ((yesVotes / confTotal) * 100).toFixed(1) : '0';
-  const noPercentage = confTotal > 0 ? ((noVotes / confTotal) * 100).toFixed(1) : '0';
-  const isApproved = yesVotes > noVotes;
+  const yesVotes = confidenceStats.yesVotes;
+  const noVotes = confidenceStats.noVotes;
+  const yesPercentage = confidenceStats.yesPercentage.toFixed(1);
+  const noPercentage = confidenceStats.noPercentage.toFixed(1);
+  const isApproved = confidenceStats.outcome === 'approved';
 
   // Print handler - triggers browser print dialog styled for A4 official paper
   const handlePrint = () => {
@@ -67,7 +66,7 @@ export function ElectionReportModal({
         سقف_تعرفه_های_ماخوذه: isTotalBallotsKnown && totalVotes > 0 ? totalVotes : 'نامشخص (شمارش پویا)',
         کل_برگه_های_قرائت_شده: countedBallots,
         برگه_های_باطله_و_سفید: invalidVotes,
-        مجموع_آرای_صحیح_ماخوذه: isConfidence ? confTotal : totalValidVotes,
+        مجموع_آرای_صحیح_ماخوذه: isConfidence ? confidenceStats.validVotes : totalValidVotes,
         تعداد_کرسی_های_منتخب: isConfidence ? 1 : winnersCount
       },
       نتایج_کاندیداها: isConfidence
@@ -81,16 +80,14 @@ export function ElectionReportModal({
               نتیجه_نهایی: isApproved ? 'کسب رأی اعتماد' : 'عدم کسب رأی اعتماد'
             }
           ]
-        : sortedCandidates.map((c, index) => {
-            const isWinner = index < winnersCount;
-            const isAlternate = index >= winnersCount && index < winnersCount + 2;
-            const pct = ballotBase > 0 ? ((c.votes / ballotBase) * 100).toFixed(1) : '0.0';
+        : sortedCandidates.map((c) => {
+            const pct = ballotBase > 0 ? c.percentageOfBallots.toFixed(1) : '0.0';
             return {
-              رتبه: index + 1,
+              رتبه: c.rank,
               نام_کاندیدا: c.name,
               تعداد_آرا: c.votes,
               درصد_از_کل_تعرفه_ها: `${pct}٪`,
-              وضعیت: isWinner ? 'عضو منتخب اصلی' : (isAlternate ? 'عضو علی‌البدل' : 'عدم انتخاب')
+              وضعیت: c.status === 'winner' ? 'عضو منتخب اصلی' : (c.status === 'tie' ? 'تساوی کرسی' : (c.status === 'alternate' ? 'عضو علی‌البدل' : 'عدم انتخاب'))
             };
           }),
       امضاکنندگان_رسمی: [
@@ -271,12 +268,11 @@ export function ElectionReportModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedCandidates.map((candidate, index) => {
-                      const isWinner = index < winnersCount;
-                      const isAlternate = index >= winnersCount && index < winnersCount + 2;
-                      const percentage = ballotBase > 0 
-                        ? ((candidate.votes / ballotBase) * 100).toFixed(1) 
-                        : '0.0';
+                    {sortedCandidates.map((candidate) => {
+                      const isWinner = candidate.status === 'winner';
+                      const isAlternate = candidate.status === 'alternate';
+                      const isTie = candidate.status === 'tie';
+                      const percentage = candidate.percentageOfBallots.toFixed(1);
 
                       return (
                         <tr 
@@ -286,7 +282,7 @@ export function ElectionReportModal({
                           }`}
                         >
                           <td className="p-2.5 text-center font-black">
-                            {(index + 1).toLocaleString('fa-IR')}
+                            {candidate.rank.toLocaleString('fa-IR')}
                           </td>
                           <td className="p-2 text-center">
                             {candidate.photoUrl ? (
@@ -297,7 +293,7 @@ export function ElectionReportModal({
                               />
                             ) : (
                               <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-500 mx-auto flex items-center justify-center font-bold text-[10px]">
-                                {(index + 1).toLocaleString('fa-IR')}
+                                {candidate.rank.toLocaleString('fa-IR')}
                               </div>
                             )}
                           </td>
@@ -313,11 +309,15 @@ export function ElectionReportModal({
                           <td className="p-2.5 text-center">
                             {isWinner ? (
                               <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                منتخب اصلی (نفر {index + 1})
+                                منتخب اصلی (نفر {candidate.rank})
+                              </span>
+                            ) : isTie ? (
+                              <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                تساوی کرسی
                               </span>
                             ) : isAlternate ? (
                               <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                علی‌البدل (نفر {index - winnersCount + 1})
+                                علی‌البدل
                               </span>
                             ) : (
                               <span className="text-[11px] text-slate-500 font-medium">
