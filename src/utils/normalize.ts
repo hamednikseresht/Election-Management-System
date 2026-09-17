@@ -26,6 +26,7 @@ export function emptyElection(id: 'election1' | 'election2'): SingleElection {
     countedBallots: 0,
     invalidVotes: 0,
     winnersCount: 1,
+    majorityRule: 'relative',
     candidates: [],
     confidence: { candidateName: '', yesVotes: 0, noVotes: 0 },
     active: true,
@@ -89,6 +90,7 @@ export function normalizeSingleElection(raw: unknown, defaultElection: SingleEle
     countedBallots: asNumber(raw.countedBallots),
     invalidVotes: asNumber(raw.invalidVotes),
     winnersCount: Math.max(1, asNumber(raw.winnersCount, defaultElection.winnersCount)),
+    majorityRule: raw.majorityRule === 'absolute' ? 'absolute' : 'relative',
     candidates: normalizeCandidates(raw.candidates, defaultElection.candidates),
     confidence: {
       candidateName:
@@ -122,6 +124,7 @@ export function normalizeElectionData(raw: unknown): MultiElectionData {
       displayMode,
       election1: normalizeSingleElection(raw.election1, defaultSingleElection1),
       election2: normalizeSingleElection(raw.election2, defaultSingleElection2),
+      updatedAt: typeof raw.updatedAt === 'number' && raw.updatedAt > 0 ? raw.updatedAt : 0,
     };
   }
 
@@ -131,5 +134,6 @@ export function normalizeElectionData(raw: unknown): MultiElectionData {
     displayMode: 'single-1',
     election1: normalizeSingleElection(raw, defaultSingleElection1),
     election2: defaultSingleElection2,
+    updatedAt: 0,
   };
 }

@@ -7,6 +7,11 @@ import {
   submitInvalidBallot,
   submitValidBallot,
   undoLastBallot,
+  canRegisterBallot,
+  canConcludeElection,
+  getConcludeBlockReason,
+  getMaxMarksPerBallot,
+  isBallotSelectionWithinLimit,
 } from './electionStats';
 
 function election(partial: Partial<SingleElection> = {}): SingleElection {
@@ -152,5 +157,126 @@ describe('getCompetitiveStats', () => {
     );
     expect(stats.countedBallots).toBe(10);
     expect(stats.ranked[0].percentageOfBallots).toBe(80);
+  });
+
+  it('keeps plurality winners under relative majority', () => {
+    const stats = getCompetitiveStats(
+      election({
+        countedBallots: 20,
+        winnersCount: 2,
+        majorityRule: 'relative',
+        candidates: [
+          { id: 'a', name: 'الف', votes: 8 },
+          { id: 'b', name: 'ب', votes: 6 },
+          { id: 'c', name: 'ج', votes: 3 },
+        ],
+      }),
+    );
+    expect(stats.ranked.map((c) => c.status)).toEqual(['winner', 'winner', 'alternate']);
+  });
+
+  it('requires more than half of ballots for absolute majority winners', () => {
+    const stats = getCompetitiveStats(
+      election({
+        countedBallots: 20,
+        winnersCount: 2,
+        majorityRule: 'absolute',
+        candidates: [
+          { id: 'a', name: 'الف', votes: 12 },
+          { id: 'b', name: 'ب', votes: 6 },
+          { id: 'c', name: 'ج', votes: 3 },
+        ],
+      }),
+    );
+    expect(stats.requiredAbsoluteVotes).toBe(11);
+    expect(stats.ranked[0].status).toBe('winner');
+    expect(stats.ranked[1].status).toBe('short');
+    expect(stats.hasUnfilledSeats).toBe(true);
+  });
+});
+
+describe('ballot ceiling', () => {
+  it('blocks extra ballots once counted equals the known total', () => {
+    const full = election({
+      totalVotes: 2,
+      isTotalBallotsKnown: true,
+      countedBallots: 2,
+    });
+    expect(canRegisterBallot(full)).toBe(false);
+    expect(submitValidBallot(full, ['a']).countedBallots).toBe(2);
+    expect(submitInvalidBallot(full).invalidVotes).toBe(0);
+  });
+
+  it('blocks registration in ceiling mode until a positive total is set', () => {
+    const unset = election({
+      totalVotes: 0,
+      isTotalBallotsKnown: true,
+      countedBallots: 0,
+    });
+    expect(canRegisterBallot(unset)).toBe(false);
+    expect(submitValidBallot(unset, ['a']).countedBallots).toBe(0);
+  });
+
+  it('allows registration while counted is still below the total', () => {
+    const room = election({
+      totalVotes: 3,
+      isTotalBallotsKnown: true,
+      countedBallots: 2,
+    });
+    expect(canRegisterBallot(room)).toBe(true);
+    expect(submitValidBallot(room, ['a']).countedBallots).toBe(3);
+  });
+
+  it('allows unlimited ballots when the ceiling is off', () => {
+    const open = election({
+      isTotalBallotsKnown: false,
+      countedBallots: 50,
+      totalVotes: 10,
+    });
+    expect(canRegisterBallot(open)).toBe(true);
+    expect(submitValidBallot(open, ['a']).countedBallots).toBe(51);
+  });
+
+  it('rejects more marks on one ballot than winnersCount', () => {
+    const data = election({
+      winnersCount: 2,
+      isTotalBallotsKnown: false,
+      countedBallots: 0,
+      candidates: [
+        { id: 'a', name: 'الف', votes: 0 },
+        { id: 'b', name: 'ب', votes: 0 },
+        { id: 'c', name: 'ج', votes: 0 },
+      ],
+    });
+    expect(getMaxMarksPerBallot(data)).toBe(2);
+    expect(isBallotSelectionWithinLimit(data, ['a', 'b'])).toBe(true);
+    expect(isBallotSelectionWithinLimit(data, ['a', 'b', 'c'])).toBe(false);
+
+    const rejected = submitValidBallot(data, ['a', 'b', 'c']);
+    expect(rejected.countedBallots).toBe(0);
+    expect(rejected.candidates.every((c) => c.votes === 0)).toBe(true);
+
+    const ok = submitValidBallot(data, ['a', 'b']);
+    expect(ok.countedBallots).toBe(1);
+    expect(ok.candidates.find((c) => c.id === 'a')?.votes).toBe(1);
+    expect(ok.candidates.find((c) => c.id === 'c')?.votes).toBe(0);
+  });
+
+  it('blocks concluding until every known ballot is registered', () => {
+    const partial = election({
+      totalVotes: 10,
+      isTotalBallotsKnown: true,
+      countedBallots: 4,
+    });
+    expect(canConcludeElection(partial)).toBe(false);
+    expect(getConcludeBlockReason(partial)).toContain('همه');
+
+    const complete = election({
+      totalVotes: 4,
+      isTotalBallotsKnown: true,
+      countedBallots: 4,
+    });
+    expect(canConcludeElection(complete)).toBe(true);
+    expect(canConcludeElection(election({ isTotalBallotsKnown: false, countedBallots: 1 }))).toBe(true);
   });
 });

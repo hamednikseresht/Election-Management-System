@@ -1,10 +1,19 @@
-import { useEffect, useState, useRef, type ChangeEvent } from 'react';
+import { useEffect, useState, useRef, useCallback, type ChangeEvent, type Dispatch, type SetStateAction } from 'react';
 import { MultiElectionData } from './types';
 import { OperatorTab } from './components/OperatorTab';
 import { DisplayTab } from './components/DisplayTab';
+import { OperatorPinButton, OperatorPinGate } from './components/OperatorPinGate';
 import { defaultMultiElectionData, normalizeElectionData } from './utils/normalize';
 import { createId } from './utils/ids';
 import { isTrustedMessage, postToWindow } from './utils/syncOrigin';
+import {
+  getDataRevision,
+  isPersistStorageEventKey,
+  loadPersistedState,
+  loadPersistedStateSync,
+  savePersistedState,
+  touchDataRevision,
+} from './utils/persist';
 import { 
   Vote, MonitorPlay, Maximize2, Minimize2, 
   ExternalLink, Download, Upload,
@@ -13,11 +22,17 @@ import {
 
 export { defaultMultiElectionData, normalizeElectionData };
 
-const STORAGE_KEY = 'multi_election_app_data_v2';
-const LEGACY_STORAGE_KEY = 'election_app_data_v1';
 const SYNC_CHANNEL_NAME = 'multi_election_sync_channel';
 
 const TAB_CLIENT_ID = typeof window !== 'undefined' ? createId('tab') : 'server';
+
+type SyncMessage = {
+  type: 'SYNC_DATA' | 'REQUEST_DATA';
+  payload?: MultiElectionData;
+  senderId: string;
+  timestamp: number;
+  revision?: number;
+};
 
 export default function App() {
   const isDisplayUrl = typeof window !== 'undefined' && window.location.search.includes('view=display');
@@ -25,51 +40,38 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const popupWindowRef = useRef<Window | null>(null);
 
-  // Flags to prevent ping-pong broadcast loops
-  const isRemoteSyncRef = useRef<boolean>(false);
+  // How many upcoming data-effect runs should skip broadcast (remote applies)
+  const remoteSkipCountRef = useRef(0);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
-
-  // Notice state for manual refresh feedback
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
-  // Initialize data with normalization
   const [data, setData] = useState<MultiElectionData>(() => {
-    try {
-      const savedV2 = localStorage.getItem(STORAGE_KEY);
-      if (savedV2) {
-        return normalizeElectionData(JSON.parse(savedV2));
-      }
-      const savedV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (savedV1) {
-        return normalizeElectionData(JSON.parse(savedV1));
-      }
-    } catch {
-      // ignore
-    }
-    return defaultMultiElectionData;
+    const saved = loadPersistedStateSync();
+    return saved != null ? normalizeElectionData(saved) : defaultMultiElectionData;
   });
 
   const dataRef = useRef(data);
   dataRef.current = data;
 
-  // Broadcast sync payload cleanly without echoing back to self
-  const broadcastSync = (payloadData?: MultiElectionData) => {
-    const toSend = payloadData || dataRef.current;
-    // 1. Save to localStorage
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSend));
-    } catch {
-      // ignore
-    }
+  /** Local edits always bump updatedAt so stale peers / IDB cannot win. */
+  const commitLocalData: Dispatch<SetStateAction<MultiElectionData>> = useCallback((update) => {
+    setData((prev) => {
+      const next = typeof update === 'function' ? update(prev) : update;
+      return touchDataRevision(normalizeElectionData(next), prev);
+    });
+  }, []);
 
-    const message = {
-      type: 'SYNC_DATA',
-      payload: toSend,
-      senderId: TAB_CLIENT_ID,
-      timestamp: Date.now()
-    };
+  const applyRemotePayload = useCallback((payload: unknown) => {
+    const normalized = normalizeElectionData(payload);
+    const remoteRev = getDataRevision(normalized);
+    const localRev = getDataRevision(dataRef.current);
+    if (remoteRev < localRev) return;
+    if (JSON.stringify(normalized) === JSON.stringify(dataRef.current)) return;
+    remoteSkipCountRef.current += 1;
+    setData(normalized);
+  }, []);
 
-    // 2. BroadcastChannel
+  const postSyncMessage = useCallback((message: SyncMessage) => {
     if (broadcastChannelRef.current) {
       try {
         broadcastChannelRef.current.postMessage(message);
@@ -77,8 +79,6 @@ export default function App() {
         // ignore
       }
     }
-
-    // 3. Popup window
     if (popupWindowRef.current && !popupWindowRef.current.closed) {
       try {
         postToWindow(popupWindowRef.current, message);
@@ -86,51 +86,94 @@ export default function App() {
         // ignore
       }
     }
-  };
+  }, []);
 
-  // Broadcast whenever data changes LOCALLY (not triggered by incoming remote sync)
-  useEffect(() => {
-    if (isRemoteSyncRef.current) {
-      // This state update was received from another window, do not bounce it back!
-      isRemoteSyncRef.current = false;
-      return;
-    }
-    broadcastSync(data);
-  }, [data]);
+  const broadcastSync = useCallback((payloadData?: MultiElectionData) => {
+    const toSend = payloadData || dataRef.current;
+    void savePersistedState(toSend);
+    postSyncMessage({
+      type: 'SYNC_DATA',
+      payload: toSend,
+      senderId: TAB_CLIENT_ID,
+      timestamp: Date.now(),
+      revision: getDataRevision(toSend),
+    });
+  }, [postSyncMessage]);
 
-  // Handle manual pull/refresh
-  const refreshFromSource = () => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const normalized = normalizeElectionData(parsed);
-        isRemoteSyncRef.current = true;
-        setData(normalized);
-      }
-    } catch {
-      // ignore
-    }
-
-    // Request fresh data from any peer
-    const reqMessage = { type: 'REQUEST_DATA', senderId: TAB_CLIENT_ID, timestamp: Date.now() };
+  const requestPeerData = useCallback(() => {
+    const reqMessage: SyncMessage = {
+      type: 'REQUEST_DATA',
+      senderId: TAB_CLIENT_ID,
+      timestamp: Date.now(),
+    };
     if (broadcastChannelRef.current) {
       try {
         broadcastChannelRef.current.postMessage(reqMessage);
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
-
     if (window.opener && !window.opener.closed) {
       try {
         postToWindow(window.opener, reqMessage);
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
+  }, []);
+
+  // Persist + broadcast local changes only
+  useEffect(() => {
+    if (remoteSkipCountRef.current > 0) {
+      remoteSkipCountRef.current -= 1;
+      return;
+    }
+    broadcastSync(data);
+  }, [data, broadcastSync]);
+
+  // Hydrate from IndexedDB without clobbering newer in-memory edits
+  useEffect(() => {
+    let cancelled = false;
+    loadPersistedState().then(async (raw) => {
+      if (cancelled || raw == null) return;
+      const normalized = normalizeElectionData(raw);
+      const storedRev = getDataRevision(normalized);
+      const localRev = getDataRevision(dataRef.current);
+
+      if (storedRev < localRev) {
+        await savePersistedState(dataRef.current);
+        broadcastSync(dataRef.current);
+        return;
+      }
+
+      if (JSON.stringify(normalized) !== JSON.stringify(dataRef.current)) {
+        applyRemotePayload(normalized);
+        await savePersistedState(normalized);
+      } else if (storedRev === 0) {
+        const stamped = touchDataRevision(dataRef.current);
+        remoteSkipCountRef.current += 1;
+        setData(stamped);
+        await savePersistedState(stamped);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRemotePayload, broadcastSync]);
+
+  const refreshFromSource = () => {
+    void loadPersistedState().then((raw) => {
+      if (raw != null) applyRemotePayload(raw);
+    });
+    requestPeerData();
+    // Push our latest too so projector catches up even if it never asked
+    broadcastSync(dataRef.current);
 
     setSyncFeedback('اطلاعات با موفقیت همگام‌سازی شد');
     setTimeout(() => setSyncFeedback(null), 2500);
   };
 
-  // Setup single persistent BroadcastChannel and event listeners
+  // BroadcastChannel + storage + postMessage
   useEffect(() => {
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
@@ -139,26 +182,18 @@ export default function App() {
         broadcastChannelRef.current = channel;
 
         channel.onmessage = (event) => {
-          // Ignore messages from self!
           if (event.data?.senderId === TAB_CLIENT_ID) return;
 
           if (event.data?.type === 'SYNC_DATA' && event.data?.payload) {
-            const incomingStr = JSON.stringify(event.data.payload);
-            const currentStr = JSON.stringify(dataRef.current);
-            if (incomingStr !== currentStr) {
-              isRemoteSyncRef.current = true;
-              setData(normalizeElectionData(event.data.payload));
-            }
+            applyRemotePayload(event.data.payload);
           } else if (event.data?.type === 'REQUEST_DATA') {
-            // Another tab requested current state - send without marking remote
-            if (channel) {
-              channel.postMessage({
-                type: 'SYNC_DATA',
-                payload: dataRef.current,
-                senderId: TAB_CLIENT_ID,
-                timestamp: Date.now()
-              });
-            }
+            channel?.postMessage({
+              type: 'SYNC_DATA',
+              payload: dataRef.current,
+              senderId: TAB_CLIENT_ID,
+              timestamp: Date.now(),
+              revision: getDataRevision(dataRef.current),
+            } satisfies SyncMessage);
           }
         };
       } catch {
@@ -167,17 +202,10 @@ export default function App() {
     }
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY && e.newValue) {
-        try {
-          const currentStr = JSON.stringify(dataRef.current);
-          if (e.newValue !== currentStr) {
-            isRemoteSyncRef.current = true;
-            setData(normalizeElectionData(JSON.parse(e.newValue)));
-          }
-        } catch {
-          // ignore
-        }
-      }
+      if (!isPersistStorageEventKey(e.key)) return;
+      void loadPersistedState().then((raw) => {
+        if (raw != null) applyRemotePayload(raw);
+      });
     };
     window.addEventListener('storage', handleStorageChange);
 
@@ -186,35 +214,49 @@ export default function App() {
       if (e.data?.senderId === TAB_CLIENT_ID) return;
 
       if (e.data?.type === 'SYNC_DATA' && e.data?.payload) {
-        const incomingStr = JSON.stringify(e.data.payload);
-        const currentStr = JSON.stringify(dataRef.current);
-        if (incomingStr !== currentStr) {
-          isRemoteSyncRef.current = true;
-          setData(normalizeElectionData(e.data.payload));
-        }
+        applyRemotePayload(e.data.payload);
       } else if (e.data?.type === 'REQUEST_DATA') {
         if (e.source && 'postMessage' in e.source) {
           postToWindow(e.source as Window, {
             type: 'SYNC_DATA',
             payload: dataRef.current,
             senderId: TAB_CLIENT_ID,
-            timestamp: Date.now()
-          });
+            timestamp: Date.now(),
+            revision: getDataRevision(dataRef.current),
+          } satisfies SyncMessage);
         }
       }
     };
     window.addEventListener('message', handleMessage);
 
-    // Initial announce from secondary display to request latest state
+    const pullOnVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadPersistedState().then((raw) => {
+        if (raw != null) applyRemotePayload(raw);
+      });
+      if (isDisplayUrl) requestPeerData();
+      else broadcastSync(dataRef.current);
+    };
+    document.addEventListener('visibilitychange', pullOnVisible);
+    window.addEventListener('focus', pullOnVisible);
+
     if (isDisplayUrl) {
-      if (channel) {
-        channel.postMessage({ type: 'REQUEST_DATA', senderId: TAB_CLIENT_ID, timestamp: Date.now() });
-      }
-      if (window.opener && !window.opener.closed) {
-        try {
-          postToWindow(window.opener, { type: 'REQUEST_DATA', senderId: TAB_CLIENT_ID, timestamp: Date.now() });
-        } catch {}
-      }
+      requestPeerData();
+      // Retry shortly after open — opener may still be wiring the popup ref
+      const t1 = window.setTimeout(requestPeerData, 250);
+      const t2 = window.setTimeout(requestPeerData, 800);
+      const t3 = window.setTimeout(requestPeerData, 1600);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+        window.clearTimeout(t3);
+        channel?.close();
+        broadcastChannelRef.current = null;
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('message', handleMessage);
+        document.removeEventListener('visibilitychange', pullOnVisible);
+        window.removeEventListener('focus', pullOnVisible);
+      };
     }
 
     return () => {
@@ -222,10 +264,11 @@ export default function App() {
       broadcastChannelRef.current = null;
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('message', handleMessage);
+      document.removeEventListener('visibilitychange', pullOnVisible);
+      window.removeEventListener('focus', pullOnVisible);
     };
-  }, []);
+  }, [applyRemotePayload, broadcastSync, isDisplayUrl, requestPeerData]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F11') {
@@ -248,10 +291,7 @@ export default function App() {
   };
 
   const openDisplayWindow = () => {
-    // Save state immediately before opening
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataRef.current));
-    } catch {}
+    void savePersistedState(dataRef.current);
 
     const url = new URL(window.location.href);
     url.searchParams.set('view', 'display');
@@ -264,7 +304,6 @@ export default function App() {
     );
     popupWindowRef.current = popup;
 
-    // Send multiple sync pulses as popup initializes
     const sendPulse = () => {
       if (popup && !popup.closed) {
         try {
@@ -272,8 +311,9 @@ export default function App() {
             type: 'SYNC_DATA', 
             payload: dataRef.current,
             senderId: TAB_CLIENT_ID,
-            timestamp: Date.now()
-          });
+            timestamp: Date.now(),
+            revision: getDataRevision(dataRef.current),
+          } satisfies SyncMessage);
         } catch {}
       }
     };
@@ -308,7 +348,7 @@ export default function App() {
           if (!window.confirm('بازیابی این فایل، داده‌های فعلی هر دو انتخابات را جایگزین می‌کند. ادامه می‌دهید؟')) {
             return;
           }
-          setData(normalizeElectionData(parsed));
+          commitLocalData(normalizeElectionData(parsed));
         }
       } catch {
         alert('فایل انتخاب شده معتبر نمی‌باشد.');
@@ -320,9 +360,9 @@ export default function App() {
 
   if (isDisplayUrl) {
     return (
-      <div className="h-screen w-screen flex flex-col font-sans overflow-hidden select-none bg-slate-950 text-slate-50">
+      <div className="h-screen w-screen flex flex-col font-sans overflow-hidden select-none bg-[var(--color-canvas)] text-[var(--color-ink)]">
         {syncFeedback && (
-          <div className="bg-emerald-600 text-white text-xs font-bold py-1 px-4 text-center flex items-center justify-center gap-1.5 shadow-md z-[60] animate-in fade-in duration-200">
+          <div className="bg-slate-800 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
             <Check size={14} />
             <span>{syncFeedback}</span>
           </div>
@@ -337,101 +377,99 @@ export default function App() {
     );
   }
 
-  // Operator Main Window
   return (
-    <div className="h-screen flex flex-col font-sans overflow-hidden select-none bg-slate-100 text-slate-900 transition-colors duration-200">
-      {/* Sync Notification Banner */}
+    <OperatorPinGate>
+    <div className="h-screen flex flex-col font-sans overflow-hidden select-none bg-[var(--color-canvas)] text-[var(--color-ink)]">
       {syncFeedback && (
-        <div className="bg-emerald-600 text-white text-xs font-bold py-1 px-4 text-center flex items-center justify-center gap-1.5 shadow-md z-[60] animate-in fade-in duration-200">
+        <div className="bg-slate-800 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
           <Check size={14} />
           <span>{syncFeedback}</span>
         </div>
       )}
 
-      {/* Main Top Header */}
-      <header className="px-3 py-2 shrink-0 z-50 border-b border-slate-200 bg-white text-slate-800 shadow-xs">
-        <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
+      <header className="px-4 py-3 shrink-0 z-50 border-b border-[var(--color-line)] bg-white/90 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
           
-          {/* Logo & Title */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-emerald-500 flex items-center justify-center shadow-md text-white">
-              <Vote size={18} />
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-[var(--color-brand)] flex items-center justify-center text-white shrink-0">
+              <Vote size={18} strokeWidth={2} />
             </div>
-            <div>
-              <h1 className="text-sm font-black leading-none text-slate-900">
-                سامانه جامع مدیریت انتخابات
+            <div className="min-w-0">
+              <h1 className="text-base font-bold tracking-tight text-[var(--color-ink)] leading-tight truncate">
+                سامانه مدیریت انتخابات
               </h1>
-              <span className="text-[11px] text-slate-500">
-                مدیریت شمارش آرا و نمایشگر سالن
-              </span>
+              <p className="text-[11px] text-[var(--color-ink-muted)] mt-0.5">
+                شمارش تعرفه · نمایش سالن · صورتجلسه
+              </p>
             </div>
           </div>
 
-          {/* Navigation Tabs (Operator vs Display Preview) */}
-          <div className="flex gap-1.5 p-1 rounded-xl border border-slate-200 bg-slate-100">
+          <div className="ems-segment" role="tablist" aria-label="نمای اصلی">
             <button
+              type="button"
               id="operator-tab-button"
+              role="tab"
+              aria-selected={activeTab === 'operator'}
+              data-active={activeTab === 'operator'}
               onClick={() => setActiveTab('operator')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'operator' 
-                  ? 'bg-indigo-600 text-white shadow-xs' 
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={activeTab === 'operator' ? 'is-active' : ''}
             >
-              <Vote size={15} />
-              <span>پنل اپراتور</span>
+              <span className="inline-flex items-center gap-1.5">
+                <Vote size={14} />
+                پنل اپراتور
+              </span>
             </button>
             <button
+              type="button"
               id="display-tab-button"
+              role="tab"
+              aria-selected={activeTab === 'display'}
+              data-active={activeTab === 'display'}
               onClick={() => setActiveTab('display')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'display' 
-                  ? 'bg-emerald-600 text-white shadow-xs' 
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={activeTab === 'display' ? 'is-active' : ''}
             >
-              <MonitorPlay size={15} />
-              <span>پیش‌نمایش سالن</span>
+              <span className="inline-flex items-center gap-1.5">
+                <MonitorPlay size={14} />
+                پیش‌نمایش سالن
+              </span>
             </button>
           </div>
 
-          {/* Secondary Monitor Launcher & Tools */}
           <div className="flex items-center flex-wrap gap-1.5">
-            {/* Sync / Refresh Button */}
             <button
               type="button"
               id="main-sync-button"
               onClick={refreshFromSource}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-all cursor-pointer"
+              className="ems-btn ems-btn-ghost"
               title="همگام‌سازی فوری و ارسال آخرین اطلاعات به مانیتور دوم"
             >
               <RefreshCw size={13} />
-              <span className="hidden md:inline">همگام‌سازی مانیتور</span>
+              <span className="hidden md:inline">همگام‌سازی</span>
             </button>
 
-            {/* Secondary Monitor Popup */}
             <button
               type="button"
               id="open-second-monitor"
               onClick={openDisplayWindow}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black rounded-lg border border-sky-700 bg-sky-600 hover:bg-sky-500 text-white transition-all shadow-xs cursor-pointer"
-              title="باز کردن صفحه نمایشگر در پنجره جداگانه (برای ویدئو پروژکتور یا مانیتور دوم سالن)"
+              className="ems-btn ems-btn-primary"
+              title="باز کردن صفحه نمایشگر در پنجره جداگانه"
             >
               <ExternalLink size={14} />
-              <span>مانیتور دوم / پروژکتور</span>
+              <span>مانیتور دوم</span>
             </button>
 
             <button
+              type="button"
               onClick={exportDataBackup}
-              className="p-1.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-              title="پشتیبان‌گیری از داده‌های هر دو انتخابات (Export JSON)"
+              className="ems-btn ems-btn-ghost !px-2"
+              title="پشتیبان‌گیری JSON"
             >
               <Download size={15} />
             </button>
 
             <label 
-              className="p-1.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-              title="بازیابی فایل پشتیبان (Import JSON)"
+              className="ems-btn ems-btn-ghost !px-2"
+              title="بازیابی فایل پشتیبان"
             >
               <Upload size={15} />
               <input 
@@ -442,9 +480,12 @@ export default function App() {
               />
             </label>
 
+            <OperatorPinButton />
+
             <button
+              type="button"
               onClick={toggleFullscreen}
-              className="p-1.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              className="ems-btn ems-btn-ghost !px-2"
               title={isFullscreen ? 'خروج از تمام‌صفحه (F11)' : 'تمام‌صفحه (F11)'}
             >
               {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
@@ -454,12 +495,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content View */}
       <main className="flex-1 overflow-hidden relative">
         {activeTab === 'operator' ? (
           <OperatorTab 
             data={data} 
-            setData={setData} 
+            setData={commitLocalData} 
           />
         ) : (
           <DisplayTab 
@@ -469,5 +509,6 @@ export default function App() {
         )}
       </main>
     </div>
+    </OperatorPinGate>
   );
 }

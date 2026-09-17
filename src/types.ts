@@ -1,4 +1,5 @@
 export type ElectionType = 'candidates' | 'confidence';
+export type MajorityRule = 'relative' | 'absolute';
 
 export interface Candidate {
   id: string;
@@ -29,6 +30,7 @@ export interface SingleElection {
   countedBallots?: number;
   invalidVotes: number;
   winnersCount: number;
+  majorityRule?: MajorityRule;
   candidates: Candidate[];
   confidence: ConfidenceVoteData;
   active: boolean;
@@ -45,6 +47,8 @@ export interface MultiElectionData {
   displayMode: DisplayMode;
   election1: SingleElection;
   election2: SingleElection;
+  /** Monotonic revision for cross-tab / IDB sync (ms + counter). */
+  updatedAt?: number;
 }
 
 export type ElectionData = MultiElectionData;
