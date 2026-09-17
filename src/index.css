@@ -16,8 +16,8 @@
   --color-brand: #0f172a;
   --color-accent: #0369a1;
   --color-accent-soft: #e0f2fe;
-  --color-success: #0369a1;
-  --color-success-soft: #e0f2fe;
+  --color-success: #047857;
+  --color-success-soft: #d1fae5;
   --color-danger: #b91c1c;
   --color-danger-soft: #fee2e2;
   --color-warn: #a16207;
@@ -146,12 +146,12 @@ textarea:focus-visible,
 }
 
 .ems-btn-success {
-  background: var(--color-accent);
+  background: var(--color-success);
   color: #fff;
-  border: 1px solid #0284c7;
+  border: 1px solid #065f46;
 }
 .ems-btn-success:hover:not(:disabled) {
-  background: #0284c7;
+  background: #065f46;
 }
 
 .ems-btn-danger {

@@ -52,7 +52,7 @@ export function DisplayTab({
             <RefreshCw size={14} className={`${isRefreshing ? 'animate-spin text-sky-700' : ''}`} />
             <span>{isRefreshing ? 'در حال همگام‌سازی...' : 'همگام‌سازی اطلاعات'}</span>
             {showRefreshNotice && (
-              <span className="flex items-center gap-1 text-[11px] bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md font-black border border-slate-300">
+              <span className="flex items-center gap-1 text-[11px] bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-md font-bold border border-emerald-200">
                 <Check size={13} />
                 بروز شد
               </span>

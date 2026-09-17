@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { SingleElection } from '../types';
 import { getCompetitiveStats, getConfidenceStats } from '../utils/electionStats';
 import { 
@@ -315,7 +315,7 @@ export function ElectionReportModal({
                           </td>
                           <td className="p-2.5 text-center">
                             {isWinner ? (
-                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-black bg-slate-100 text-slate-800 border border-slate-300">
+                              <span className="inline-block px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200">
                                 منتخب اصلی (نفر {candidate.rank})
                               </span>
                             ) : isTie ? (
@@ -349,10 +349,10 @@ export function ElectionReportModal({
                   موضوع رأی اعتماد: <span className="text-sky-800">{election.confidence?.candidateName || 'کاندیدا'}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-center">
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                    <div className="text-xs text-slate-800 font-bold mb-1">آرای موافق (آری)</div>
-                    <div className="text-2xl font-black text-slate-800">{yesVotes.toLocaleString('fa-IR')}</div>
-                    <div className="text-xs text-slate-700 font-semibold mt-1">{parseFloat(yesPercentage).toLocaleString('fa-IR')}٪</div>
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <div className="text-xs text-emerald-800 font-bold mb-1">آرای موافق (آری)</div>
+                    <div className="text-2xl font-bold text-emerald-800">{yesVotes.toLocaleString('fa-IR')}</div>
+                    <div className="text-xs text-emerald-700 font-semibold mt-1">{parseFloat(yesPercentage).toLocaleString('fa-IR')}٪</div>
                   </div>
                   <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
                     <div className="text-xs text-rose-800 font-bold mb-1">آرای مخالف (نه)</div>
@@ -360,7 +360,7 @@ export function ElectionReportModal({
                     <div className="text-xs text-rose-600 font-semibold mt-1">{parseFloat(noPercentage).toLocaleString('fa-IR')}٪</div>
                   </div>
                 </div>
-                <div className="mt-4 p-2 text-center text-sm font-black rounded-lg border bg-white">
+                <div className={`mt-4 p-2 text-center text-sm font-bold rounded-lg border ${isApproved ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-white border-slate-200 text-slate-800'}`}>
                   نتیجه نهایی: {isApproved ? '✓ کاندیدا موفق به کسب اکثریت آرا و اخذ رأی اعتماد گردید.' : '✕ کاندیدا موفق به کسب نصاب رأی اعتماد نگردید.'}
                 </div>
               </div>

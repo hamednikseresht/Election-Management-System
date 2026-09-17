@@ -38,9 +38,9 @@ export const electionTheme1: DisplayThemeConfig = {
   glowShadow: 'shadow-sm',
   primaryBg: 'bg-sky-700',
   barGradient: 'bg-sky-700',
-  winnerBadge: 'bg-sky-50 text-sky-900 border-sky-200',
-  winnerRowBg: 'bg-sky-50/80',
-  winnerBorder: 'border-sky-300',
+  winnerBadge: 'bg-emerald-50 text-emerald-900 border-emerald-200',
+  winnerRowBg: 'bg-emerald-50/70',
+  winnerBorder: 'border-emerald-300',
   statGradient: 'bg-white',
   statBorder: 'border-slate-200',
   statText: 'text-slate-900',
@@ -58,9 +58,9 @@ export const electionTheme2: DisplayThemeConfig = {
   glowShadow: 'shadow-sm',
   primaryBg: 'bg-slate-800',
   barGradient: 'bg-slate-800',
-  winnerBadge: 'bg-slate-100 text-slate-900 border-slate-300',
-  winnerRowBg: 'bg-slate-50',
-  winnerBorder: 'border-slate-400',
+  winnerBadge: 'bg-emerald-50 text-emerald-900 border-emerald-200',
+  winnerRowBg: 'bg-emerald-50/70',
+  winnerBorder: 'border-emerald-300',
   statGradient: 'bg-white',
   statBorder: 'border-slate-200',
   statText: 'text-slate-900',
@@ -375,14 +375,14 @@ export function SingleElectionDisplay({
 
           <div className={`grid grid-cols-2 sm:grid-cols-4 gap-2.5 ${isHall ? 'ems-hall-stats' : 'mb-4'}`}>
             <StatCard isHall={isHall} title="کل مأخوذه" value={totalVotes} subtitle="تعرفه‌ها" icon={<Users size={isHall ? 18 : 16} className="text-slate-700" />} />
-            <StatCard isHall={isHall} title="موافق (آری)" value={yesVotes} subtitle="آرای مثبت" icon={<ThumbsUp size={isHall ? 18 : 16} className="text-slate-800" />} />
+            <StatCard isHall={isHall} title="موافق (آری)" value={yesVotes} subtitle="آرای مثبت" icon={<ThumbsUp size={isHall ? 18 : 16} className="text-emerald-700" />} />
             <StatCard isHall={isHall} title="مخالف (نه)" value={noVotes} subtitle="آرای منفی" icon={<ThumbsDown size={isHall ? 18 : 16} className="text-rose-700" />} />
             <StatCard isHall={isHall} title="باطله / ممتنع" value={invalidVotes} subtitle="سفید یا مخدوش" icon={<XCircle size={isHall ? 18 : 16} className="text-slate-600" />} />
           </div>
 
           <div className={`border rounded-2xl bg-slate-50 border-slate-200 shrink-0 ${isHall ? 'p-3 mb-2' : 'p-4 sm:p-5 mb-4'}`}>
             <div className={`flex justify-between items-center mb-2.5 ${isHall ? 'ems-hall-meta' : 'text-sm sm:text-base'} font-bold`}>
-              <div className="flex items-center gap-1.5 text-slate-800">
+              <div className="flex items-center gap-1.5 text-emerald-800">
                 <ThumbsUp size={isHall ? 16 : 16} />
                 <span>موافق: {Number(yesPercentage.toFixed(1)).toLocaleString('fa-IR')}٪ ({yesVotes.toLocaleString('fa-IR')} رأی)</span>
               </div>
@@ -394,7 +394,7 @@ export function SingleElectionDisplay({
 
             <div className={`w-full rounded-xl overflow-hidden flex p-1 border border-slate-300 bg-slate-200 ${isHall ? 'h-9' : 'h-10'}`}>
               <div
-                className="h-full bg-slate-900 rounded-lg flex items-center justify-center font-bold text-white transition-all duration-500 ease-out"
+                className="h-full bg-emerald-700 rounded-lg flex items-center justify-center font-bold text-white transition-all duration-500 ease-out"
                 style={{ width: `${Math.max(yesVotes > 0 ? 5 : 0, yesPercentage)}%`, fontSize: isHall ? '0.85rem' : undefined }}
               >
                 {yesVotes > 0 && `${yesVotes.toLocaleString('fa-IR')}`}
@@ -411,13 +411,13 @@ export function SingleElectionDisplay({
 
           <div
             className={`rounded-2xl border text-center flex items-center justify-center gap-3 ${
-              outcome === 'approved' ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-100 border-slate-200 text-slate-800'
+              outcome === 'approved' ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-slate-100 border-slate-200 text-slate-800'
             } shrink-0 ${isHall ? 'p-3' : 'p-4'}`}
           >
             <div
               className={`rounded-xl flex items-center justify-center shrink-0 ${
                 outcome === 'approved'
-                  ? 'bg-slate-200 text-slate-800'
+                  ? 'bg-emerald-100 text-emerald-800'
                   : outcome === 'rejected'
                     ? 'bg-rose-100 text-rose-700'
                     : 'bg-slate-200 text-slate-600'

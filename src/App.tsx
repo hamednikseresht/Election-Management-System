@@ -362,7 +362,7 @@ export default function App() {
     return (
       <div className="h-screen w-screen flex flex-col font-sans overflow-hidden select-none bg-[var(--color-canvas)] text-[var(--color-ink)]">
         {syncFeedback && (
-          <div className="bg-slate-800 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
+          <div className="bg-emerald-700 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
             <Check size={14} />
             <span>{syncFeedback}</span>
           </div>
@@ -381,7 +381,7 @@ export default function App() {
     <OperatorPinGate>
     <div className="h-screen flex flex-col font-sans overflow-hidden select-none bg-[var(--color-canvas)] text-[var(--color-ink)]">
       {syncFeedback && (
-        <div className="bg-slate-800 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
+        <div className="bg-emerald-700 text-white text-xs font-bold py-1.5 px-4 text-center flex items-center justify-center gap-1.5 z-[60]">
           <Check size={14} />
           <span>{syncFeedback}</span>
         </div>

@@ -142,7 +142,7 @@ export function BallotRecorder({
               </div>
             )}
             {atMarkLimit && !atCeiling && (
-              <div className="text-[10px] font-bold text-sky-800 mt-0.5">
+              <div className="text-[10px] font-bold text-emerald-800 mt-0.5">
                 سقف انتخاب این تعرفه پر شد ({maxMarks.toLocaleString('fa-IR')} نفر). برای تغییر، یکی را بردارید.
               </div>
             )}
@@ -152,7 +152,7 @@ export function BallotRecorder({
           <div
             className={`text-xs font-bold px-2.5 py-1 rounded-md border ${
               atMarkLimit
-                ? 'text-sky-900 bg-sky-50 border-sky-200'
+                ? 'text-emerald-900 bg-emerald-50 border-emerald-200'
                 : 'text-slate-800 bg-slate-100 border-slate-200'
             }`}
           >
@@ -182,13 +182,13 @@ export function BallotRecorder({
                 locked || blocked ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'
               } ${
                 isSelected
-                  ? 'bg-sky-700 text-white ring-1 ring-sky-800'
+                  ? 'bg-emerald-700 text-white ring-1 ring-emerald-800'
                   : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400 hover:bg-slate-50'
               }`}
             >
               <div
                 className={`w-4 h-4 rounded flex items-center justify-center text-[10px] ${
-                  isSelected ? 'bg-white text-sky-800 font-bold' : 'bg-slate-100 text-slate-400'
+                  isSelected ? 'bg-white text-emerald-800 font-bold' : 'bg-slate-100 text-slate-400'
                 }`}
               >
                 {isSelected ? <Check size={12} strokeWidth={3} /> : null}
