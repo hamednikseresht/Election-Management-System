@@ -3,12 +3,21 @@ import { SingleElection, Candidate, ElectionType } from '../types';
 import { DisplayThemeConfig } from './SingleElectionDisplay';
 import { fileToBase64Optimized } from '../utils/imageHelper';
 import { ElectionReportModal } from './ElectionReportModal';
+import { BallotRecorder } from './BallotRecorder';
+import { createId } from '../utils/ids';
+import {
+  concludeElection,
+  getCompetitiveStats,
+  getConfidenceStats,
+  isElectionLocked,
+  reopenElection,
+} from '../utils/electionStats';
 import { 
-  Plus, Trash2, Users, CheckCircle, XCircle, 
+  Plus, Trash2, Users, XCircle, 
   RotateCcw, ThumbsUp, ThumbsDown, ShieldCheck, 
-  Minus, Power, Award, AlertCircle, 
-  Check, Layers, RefreshCw, HelpCircle,
-  Edit2, Camera, FileText
+  Minus, Power, Award, AlertCircle,
+  RefreshCw, HelpCircle,
+  Edit2, Camera, FileText, Unlock
 } from 'lucide-react';
 
 interface SingleElectionOperatorProps {
@@ -38,38 +47,35 @@ export function SingleElectionOperator({
   const [editingCandidateNameValue, setEditingCandidateNameValue] = useState<string>('');
 
   const isConfidence = election.type === 'confidence';
-  const isTotalBallotsKnown = election.isTotalBallotsKnown ?? true;
+  const locked = isElectionLocked(election);
+  const competitive = getCompetitiveStats(election);
+  const confidenceStats = getConfidenceStats(election);
+  const isTotalBallotsKnown = competitive.isTotalBallotsKnown;
+  const totalCandidateVotes = competitive.totalCandidateMarks;
+  const minRequiredBallots = competitive.minRequiredBallots;
+  const effectiveCounted = isConfidence ? confidenceStats.countedBallots : competitive.effectiveCounted;
+  const countedPercentage = isConfidence
+    ? (isTotalBallotsKnown && election.totalVotes > 0
+      ? Math.min(100, Math.round((confidenceStats.countedBallots / election.totalVotes) * 100))
+      : 0)
+    : competitive.countedPercentage;
+  const remainingBallots = isConfidence
+    ? (isTotalBallotsKnown && election.totalVotes > 0
+      ? Math.max(0, election.totalVotes - confidenceStats.countedBallots)
+      : 0)
+    : competitive.remainingBallots;
 
-  // Total candidate marks
-  const totalCandidateVotes = election.candidates.reduce((sum, c) => sum + (c.votes || 0), 0);
-  const maxCandidateVotes = election.candidates.reduce((max, c) => Math.max(max, c.votes || 0), 0);
-  
-  // Logical minimum ballots needed
-  const minRequiredBallots = maxCandidateVotes + (election.invalidVotes || 0);
-  const countedBallots = typeof election.countedBallots === 'number' 
-    ? Math.max(election.countedBallots, minRequiredBallots) 
-    : minRequiredBallots;
-
-  // For confidence mode:
-  const confidenceTotal = (election.confidence?.yesVotes || 0) + (election.confidence?.noVotes || 0) + (election.invalidVotes || 0);
-
-  const effectiveCounted = isConfidence ? confidenceTotal : countedBallots;
-
-  const countedPercentage = (isTotalBallotsKnown && election.totalVotes > 0)
-    ? Math.min(100, Math.round((effectiveCounted / election.totalVotes) * 100))
-    : 0;
-
-  const remainingBallots = (isTotalBallotsKnown && election.totalVotes > 0)
-    ? Math.max(0, election.totalVotes - effectiveCounted)
-    : 0;
+  const applyChange = (updater: (prev: SingleElection) => SingleElection) => {
+    onUpdate((prev) => (isElectionLocked(prev) ? prev : updater(prev)));
+  };
 
   // Handlers
   const handleToggleActive = () => {
-    onUpdate(prev => ({ ...prev, active: !prev.active }));
+    applyChange(prev => ({ ...prev, active: !prev.active }));
   };
 
   const handleTypeChange = (newType: ElectionType) => {
-    onUpdate(prev => {
+    applyChange(prev => {
       let candidateName = prev.confidence?.candidateName;
       if (newType === 'confidence') {
         if (!candidateName || candidateName.trim() === '') {
@@ -89,7 +95,7 @@ export function SingleElectionOperator({
   };
 
   const toggleTotalBallotsKnown = (known: boolean) => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       isTotalBallotsKnown: known,
       totalVotes: known && prev.totalVotes <= 0 ? Math.max(100, effectiveCounted) : prev.totalVotes
@@ -97,11 +103,12 @@ export function SingleElectionOperator({
   };
 
   const handleEndVoting = () => {
-    onUpdate(prev => ({
-      ...prev,
-      concludedAt: new Date().toISOString()
-    }));
+    onUpdate((prev) => concludeElection(prev));
     setShowReportModal(true);
+  };
+
+  const handleReopenVoting = () => {
+    onUpdate((prev) => reopenElection(prev));
   };
 
   const handleNewCandidatePhotoSelect = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -110,25 +117,27 @@ export function SingleElectionOperator({
     try {
       const base64 = await fileToBase64Optimized(file);
       setNewCandidatePhoto(base64);
-    } catch (err: any) {
-      alert(err.message || 'خطا در بارگذاری تصویر');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'خطا در بارگذاری تصویر';
+      alert(message);
     }
   };
 
   const handleCandidatePhotoUpload = async (id: string, file: File) => {
     try {
       const base64 = await fileToBase64Optimized(file);
-      onUpdate(prev => ({
+      applyChange(prev => ({
         ...prev,
         candidates: prev.candidates.map(c => c.id === id ? { ...c, photoUrl: base64 } : c)
       }));
-    } catch (err: any) {
-      alert(err.message || 'خطا در بارگذاری تصویر');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'خطا در بارگذاری تصویر';
+      alert(message);
     }
   };
 
   const handleRemoveCandidatePhoto = (id: string) => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       candidates: prev.candidates.map(c => c.id === id ? { ...c, photoUrl: undefined } : c)
     }));
@@ -153,24 +162,24 @@ export function SingleElectionOperator({
 
     setCandidateError(null);
     const newCandidate: Candidate = {
-      id: Math.random().toString(36).substring(7),
+      id: createId('candidate'),
       name: trimmed,
       votes: 0,
       photoUrl: newCandidatePhoto || undefined,
     };
-    onUpdate(prev => ({ ...prev, candidates: [...prev.candidates, newCandidate] }));
+    applyChange(prev => ({ ...prev, candidates: [...prev.candidates, newCandidate] }));
     setNewCandidateName('');
     setNewCandidatePhoto(null);
   };
 
   const removeCandidate = (id: string) => {
-    onUpdate(prev => ({ ...prev, candidates: prev.candidates.filter(c => c.id !== id) }));
+    applyChange(prev => ({ ...prev, candidates: prev.candidates.filter(c => c.id !== id) }));
     setBallotSelectedIds(prev => prev.filter(cId => cId !== id));
   };
 
   // Direct increment / decrement candidate
   const incrementCandidateVote = (id: string) => {
-    onUpdate(prev => {
+    applyChange(prev => {
       const newCandidates = prev.candidates.map(c => c.id === id ? { ...c, votes: c.votes + 1 } : c);
       const newMax = newCandidates.reduce((max, c) => Math.max(max, c.votes), 0);
       const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : 0;
@@ -184,7 +193,7 @@ export function SingleElectionOperator({
   };
 
   const decrementCandidateVote = (id: string) => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       candidates: prev.candidates.map(c => c.id === id ? { ...c, votes: Math.max(0, c.votes - 1) } : c)
     }));
@@ -198,7 +207,7 @@ export function SingleElectionOperator({
   const saveEditingCandidate = (id: string) => {
     const parsed = parseInt(editingCandidateVotes, 10);
     const votes = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-    onUpdate(prev => {
+    applyChange(prev => {
       const newCandidates = prev.candidates.map(c => c.id === id ? { ...c, votes } : c);
       const newMax = newCandidates.reduce((max, c) => Math.max(max, c.votes), 0);
       const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : 0;
@@ -211,75 +220,27 @@ export function SingleElectionOperator({
     setEditingCandidateId(null);
   };
 
-  // Fast Ballot Registration (یک تعرفه حاوی نام یک یا چند کاندیدا)
-  const toggleBallotCandidate = (id: string) => {
-    setBallotSelectedIds(prev => 
-      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
-    );
-  };
-
-  const submitCurrentBallot = () => {
-    if (ballotSelectedIds.length === 0) return;
-
-    onUpdate(prev => {
-      const newCandidates = prev.candidates.map(c => {
-        if (ballotSelectedIds.includes(c.id)) {
-          return { ...c, votes: c.votes + 1 };
-        }
-        return c;
-      });
-
-      const currentBallots = typeof prev.countedBallots === 'number' 
-        ? prev.countedBallots 
-        : minRequiredBallots;
-
-      const newMax = newCandidates.reduce((max, c) => Math.max(max, c.votes), 0);
-
-      return {
-        ...prev,
-        candidates: newCandidates,
-        // Add 1 counted ballot paper, but guarantee at least highest individual vote + invalid
-        countedBallots: Math.max(currentBallots + 1, newMax + prev.invalidVotes)
-      };
-    });
-
-    // Clear ballot selections for next ballot paper
-    setBallotSelectedIds([]);
-  };
-
-  const submitInvalidBallot = () => {
-    onUpdate(prev => {
-      const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : minRequiredBallots;
-      return {
-        ...prev,
-        invalidVotes: prev.invalidVotes + 1,
-        countedBallots: currentBallots + 1
-      };
-    });
-  };
-
-  // Sync / calibrate ballots manually
   const syncBallotsToVotes = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
-      countedBallots: maxCandidateVotes + prev.invalidVotes
+      countedBallots: competitive.maxCandidateVotes + prev.invalidVotes
     }));
   };
 
   // Ballots & Invalid votes
   const incrementInvalidVote = () => {
-    onUpdate(prev => {
+    applyChange(prev => {
       const currentBallots = typeof prev.countedBallots === 'number' ? prev.countedBallots : 0;
       return { 
         ...prev, 
         invalidVotes: prev.invalidVotes + 1,
-        countedBallots: Math.max(currentBallots, maxCandidateVotes + prev.invalidVotes + 1)
+        countedBallots: Math.max(currentBallots, competitive.maxCandidateVotes + prev.invalidVotes + 1)
       };
     });
   };
 
   const decrementInvalidVote = () => {
-    onUpdate(prev => ({ 
+    applyChange(prev => ({ 
       ...prev, 
       invalidVotes: Math.max(0, prev.invalidVotes - 1) 
     }));
@@ -287,35 +248,35 @@ export function SingleElectionOperator({
 
   // Confidence votes
   const incrementConfidenceYes = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       confidence: { ...prev.confidence, yesVotes: prev.confidence.yesVotes + 1 }
     }));
   };
 
   const decrementConfidenceYes = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       confidence: { ...prev.confidence, yesVotes: Math.max(0, prev.confidence.yesVotes - 1) }
     }));
   };
 
   const incrementConfidenceNo = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       confidence: { ...prev.confidence, noVotes: prev.confidence.noVotes + 1 }
     }));
   };
 
   const decrementConfidenceNo = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       confidence: { ...prev.confidence, noVotes: Math.max(0, prev.confidence.noVotes - 1) }
     }));
   };
 
   const resetAllVotes = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       invalidVotes: 0,
       countedBallots: 0,
@@ -327,7 +288,7 @@ export function SingleElectionOperator({
   };
 
   const clearAllCandidates = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       candidates: [],
       countedBallots: prev.invalidVotes,
@@ -337,7 +298,7 @@ export function SingleElectionOperator({
   };
 
   const fullResetElection = () => {
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       title: '',
       totalVotes: 0,
@@ -370,7 +331,7 @@ export function SingleElectionOperator({
       return;
     }
 
-    onUpdate(prev => ({
+    applyChange(prev => ({
       ...prev,
       candidates: prev.candidates.map(c => c.id === id ? { ...c, name: trimmed } : c)
     }));
@@ -412,8 +373,19 @@ export function SingleElectionOperator({
             title="پایان فرآیند رأی‌گیری و صدور صورتجلسه رسمی و گزارش کامل"
           >
             <FileText size={13} className="text-indigo-600" />
-            <span>پایان رأی‌گیری و صورتجلسه</span>
+            <span>{locked ? 'مشاهده صورتجلسه' : 'پایان رأی‌گیری و صورتجلسه'}</span>
           </button>
+
+          {locked && (
+            <button
+              type="button"
+              onClick={handleReopenVoting}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 cursor-pointer"
+            >
+              <Unlock size={13} />
+              <span>بازگشایی شمارش</span>
+            </button>
+          )}
 
           {/* Prominent Reset/Restart Button for this election */}
           {showResetConfirm ? (
@@ -474,6 +446,19 @@ export function SingleElectionOperator({
         </div>
       </div>
 
+      {locked && (
+        <div className="p-3 bg-indigo-50 border border-indigo-300 rounded-2xl flex items-center justify-between text-xs text-indigo-950 font-medium">
+          <span>شمارش این انتخابات قفل شده است. برای تغییر آرا ابتدا «بازگشایی شمارش» را بزنید.</span>
+          <button
+            type="button"
+            onClick={() => setShowReportModal(true)}
+            className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-3 py-1 rounded-lg cursor-pointer"
+          >
+            صورتجلسه
+          </button>
+        </div>
+      )}
+
       {/* Inactive Warning Alert */}
       {!election.active && (
         <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between text-xs text-amber-900 font-medium">
@@ -500,7 +485,7 @@ export function SingleElectionOperator({
           <input
             type="text"
             value={election.title}
-            onChange={(e) => onUpdate(prev => ({ ...prev, title: e.target.value }))}
+            onChange={(e) => applyChange(prev => ({ ...prev, title: e.target.value }))}
             placeholder="عنوان انتخابات را بنویسید (مثلاً: انتخابات مجمع عمومی)"
             className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium"
           />
@@ -562,7 +547,7 @@ export function SingleElectionOperator({
                   onChange={(e) => {
                     const rawVal = e.target.value.trim();
                     const val = rawVal === '' ? 0 : parseInt(rawVal, 10);
-                    onUpdate(prev => ({ ...prev, totalVotes: isNaN(val) ? 0 : Math.max(0, val) }));
+                    applyChange(prev => ({ ...prev, totalVotes: isNaN(val) ? 0 : Math.max(0, val) }));
                   }}
                   className="w-24 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-indigo-500"
                 />
@@ -588,7 +573,7 @@ export function SingleElectionOperator({
               onChange={(e) => {
                 const rawVal = e.target.value.trim();
                 const val = rawVal === '' ? 0 : parseInt(rawVal, 10);
-                onUpdate(prev => ({ ...prev, countedBallots: isNaN(val) ? 0 : Math.max(0, val) }));
+                applyChange(prev => ({ ...prev, countedBallots: isNaN(val) ? 0 : Math.max(0, val) }));
               }}
               className="w-24 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-center text-sm font-black text-slate-900 focus:outline-none focus:border-indigo-500"
             />
@@ -610,7 +595,7 @@ export function SingleElectionOperator({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => onUpdate(prev => ({ 
+                onClick={() => applyChange(prev => ({ 
                   ...prev, 
                   countedBallots: Math.max(0, (typeof prev.countedBallots === 'number' ? prev.countedBallots : effectiveCounted) - 1) 
                 }))}
@@ -621,7 +606,7 @@ export function SingleElectionOperator({
               </button>
               <button
                 type="button"
-                onClick={() => onUpdate(prev => ({ 
+                onClick={() => applyChange(prev => ({ 
                   ...prev, 
                   countedBallots: (typeof prev.countedBallots === 'number' ? prev.countedBallots : effectiveCounted) + 1 
                 }))}
@@ -715,7 +700,7 @@ export function SingleElectionOperator({
                 onChange={(e) => {
                   const rawVal = e.target.value.trim();
                   const val = rawVal === '' ? 1 : parseInt(rawVal, 10);
-                  onUpdate(prev => ({ ...prev, winnersCount: isNaN(val) ? 1 : Math.max(1, val) }));
+                  applyChange(prev => ({ ...prev, winnersCount: isNaN(val) ? 1 : Math.max(1, val) }));
                 }}
                 className="w-16 bg-white border border-slate-300 rounded-lg px-2 py-1 text-center text-xs font-black text-slate-900"
               />
@@ -790,91 +775,14 @@ export function SingleElectionOperator({
             </form>
           </div>
 
-          {/* ------------------ FAST BALLOT RECORDER (ثبت برگه رأی / تعرفه) ------------------ */}
-          <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
-                  <Layers size={16} />
-                </div>
-                <div>
-                  <div className="text-xs font-black text-indigo-950">ثبت برگه رأی (تعرفه جدید):</div>
-                  <div className="text-[10px] text-indigo-700">
-                    نام‌های نوشته شده روی این برگه را انتخاب کرده و دکمه ثبت را بزنید:
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-xs font-bold text-indigo-800 bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200">
-                انتخاب شده: {ballotSelectedIds.length} نفر
-              </div>
-            </div>
-
-            {/* Candidate Selector Chips */}
-            <div className="flex flex-wrap gap-2 pt-1">
-              {election.candidates.map((c) => {
-                const isSelected = ballotSelectedIds.includes(c.id);
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => toggleBallotCandidate(c.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
-                        : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center text-[10px] ${
-                      isSelected ? 'bg-white text-indigo-700 font-black' : 'bg-slate-100 text-slate-400'
-                    }`}>
-                      {isSelected ? <Check size={12} strokeWidth={3} /> : null}
-                    </div>
-                    <span>{c.name}</span>
-                  </button>
-                );
-              })}
-
-              {election.candidates.length === 0 && (
-                <div className="text-xs text-slate-500 py-2">
-                  ابتدا نام کاندیداها را از فرم بالا اضافه کنید.
-                </div>
-              )}
-            </div>
-
-            {/* Action Buttons for Current Ballot */}
-            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-indigo-200">
-              <button
-                type="button"
-                onClick={submitCurrentBallot}
-                disabled={ballotSelectedIds.length === 0}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 active:scale-98 text-white font-bold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Check size={16} />
-                <span>ثبت این برگه رأی (+۱ به برگه‌ها و کاندیداهای منتخب)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={submitInvalidBallot}
-                className="px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-bold text-xs rounded-xl flex items-center gap-1 transition-all shrink-0 cursor-pointer"
-                title="ثبت به عنوان برگه باطله یا سفید (+۱ به باطله و برگه‌ها)"
-              >
-                <XCircle size={14} />
-                <span>برگه باطله / سفید</span>
-              </button>
-
-              {ballotSelectedIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setBallotSelectedIds([])}
-                  className="px-2.5 py-2 text-slate-600 hover:text-slate-900 text-xs font-semibold cursor-pointer"
-                >
-                  پاک کردن انتخاب‌ها
-                </button>
-              )}
-            </div>
-          </div>
+          <BallotRecorder
+            election={election}
+            theme={theme}
+            locked={locked}
+            selectedIds={ballotSelectedIds}
+            onSelectedIdsChange={setBallotSelectedIds}
+            onUpdate={applyChange}
+          />
 
           {/* ------------------ CANDIDATE DIRECT LIST & FAST COUNTER ------------------ */}
           <div>
@@ -1102,7 +1010,7 @@ export function SingleElectionOperator({
             <input
               type="text"
               value={election.confidence.candidateName}
-              onChange={(e) => onUpdate(prev => ({
+              onChange={(e) => applyChange(prev => ({
                 ...prev,
                 confidence: { ...prev.confidence, candidateName: e.target.value }
               }))}
